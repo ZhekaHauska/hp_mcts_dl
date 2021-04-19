@@ -1,5 +1,11 @@
 import heapq as hq
-from mcts_dl.utils.utils import Node, Map, CalculateCost
+import os
+import numpy as np
+from pathlib import Path
+from tqdm import tqdm
+import multiprocessing
+
+from mcts_dl.utils.utils import Node, Map, CalculateCost, ReadTasksFromMovingAIFile, ReadMapFromMovingAIFile
 
 
 class Open:
@@ -95,3 +101,50 @@ def Dijkstra(gridMap: Map, iStart: int, jStart: int, openType=Open, closedType=C
         CLOSED.AddNode(node)
 
     return CLOSED
+
+
+def ComputeRmap(map_name: str, path='.', silent=False, **args):
+    tasks = ReadTasksFromMovingAIFile(f'{path}/{map_name}.map.scen')
+    taskMap = ReadMapFromMovingAIFile(f'{path}/{map_name}.map')
+    goals = set([(task[3], task[2]) for task in tasks])
+    Path(f'{path}/{map_name}/').mkdir(parents=True, exist_ok=True)
+    if not silent:
+        print(f'map: {map_name}')
+    for iGoal, jGoal in tqdm(goals, disable=silent):
+        closed = Dijkstra(taskMap, iGoal, jGoal, **args)
+        rmap = np.zeros((taskMap.width, taskMap.height)) - 1
+        for coords, node in closed.elements.items():
+            rmap[coords[0], coords[1]] = node.g
+        np.save(f'{path}/{map_name}/{iGoal}_{jGoal}.rmap', rmap)
+
+
+def test(*args, **kwargs):
+    print(args, kwargs)
+    time.sleep(10)
+
+
+def ComputeRmapsParallel(map_list: list[str], n_jobs=-1, path='.', **args):
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+
+    n_batches = round(len(map_list) / n_jobs)
+    for batch in tqdm(range(n_batches)):
+        processes = list()
+        for map_name in map_list[batch*n_jobs: (batch+1)*n_jobs]:
+            p = multiprocessing.Process(target=ComputeRmap, args=(map_name, path, True), kwargs=args)
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join()
+
+
+if __name__ == '__main__':
+    import time
+    start_time = time.time()
+
+    maps = os.listdir('../../dataset/256/')
+    maps = [x.split('.')[0] for x in maps if x.endswith('.map')]
+
+    ComputeRmapsParallel(maps, path='../../dataset/256')
+    print("--- %s seconds ---" % (time.time() - start_time))
