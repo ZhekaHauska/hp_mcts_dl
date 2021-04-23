@@ -3,3 +3,5 @@ tqdm
 setuptools
 matplotlib
 jupyter
+torch
+torchvision
