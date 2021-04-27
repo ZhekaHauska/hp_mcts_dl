@@ -44,11 +44,14 @@ def print_metrics(metrics, epoch_samples, phase):
     print("{}: {}".format(phase, ", ".join(outputs)))
 
 
-def train_model(model, optimizer, dataloaders, num_epochs, device):
+def train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, device):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = 1e10
     model = model.to(device)
-
+    positions = input_data['pos']
+    actions = input_data['act']
+    h = 2 * offset + 1
+    w = 2 * offset + 1
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
@@ -65,25 +68,35 @@ def train_model(model, optimizer, dataloaders, num_epochs, device):
             metrics = defaultdict(float)
             epoch_samples = 0
 
-            for inputs, labels in dataloaders[phase]:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+            for inputs_, labels_ in enumerate(dataloaders[phase]):
+                map_name = inputs_.get_name()
+                for current, action in zip(positions[map_name], actions[map_name]):
+                    y, x = current
+                    inputs = inputs_[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
 
-                # zero the parameter gradients
-                optimizer.zero_grad()
+                    action_y = torch.full((1, 1, h, w), action[0])
+                    action_x = torch.full((1, 1, h, w), action[1])
+                    action_xy = torch.cat((action_y, action_x), dim=0)
+                    inputs = torch.cat((inputs, action_xy), dim=1)
 
-                # forward
-                # track history if only in train
-                with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    loss = calc_loss(outputs, labels, metrics)
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
 
-                    # backward + optimize only if in training phase
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+                    # zero the parameter gradients
+                    optimizer.zero_grad()
 
-                # statistics
+                    # forward
+                    # track history if only in train
+                    with torch.set_grad_enabled(phase == 'train'):
+                        outputs = model(inputs)
+                        loss = calc_loss(outputs, labels, metrics)
+
+                        # backward + optimize only if in training phase
+                        if phase == 'train':
+                            loss.backward()
+                            optimizer.step()
+
+                    # statistics
                 epoch_samples += inputs.size(0)
 
             print_metrics(metrics, epoch_samples, phase)
@@ -108,6 +121,7 @@ def main():
     num_classes = 2
     num_epochs = 10
     batch_size = 25
+    offset = 10
 
     dataloaders = {'train': DataLoader(train_set, batch_size=batch_size, shuffle=True),
                    'val': DataLoader(val_set, batch_size=batch_size, shuffle=False)}
@@ -116,5 +130,5 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    model = train_model(model, optimizer, dataloaders, num_epochs, device)
+    model = train_model(model, optimizer, dataloaders, num_epochs, offset, device)
 
