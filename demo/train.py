@@ -1,13 +1,19 @@
+import sys
+sys.path.append("../mcts_dl")
+
 import torch
 import torch.optim as optim
 from collections import defaultdict
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-
+from torch.utils.data import Dataset, DataLoader
+from torchvision.transforms import ToTensor
 import copy
 import time
+import numpy as np
+import os
 
 from .model import UNet
+from utils.utils import ReadMapFromMovingAIFile, Map
 
 
 def dice_loss(pred, target, smooth=1.):
@@ -68,11 +74,12 @@ def train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, d
             metrics = defaultdict(float)
             epoch_samples = 0
 
-            for inputs_, labels_ in enumerate(dataloaders[phase]):
-                map_name = inputs_.get_name()
+            for map_ in enumerate(dataloaders[phase]):
+                map_name = map_['name']
+                image_map = map_['image']
                 for current, action in zip(positions[map_name], actions[map_name]):
                     y, x = current
-                    inputs = inputs_[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
+                    inputs = image_map[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
 
                     action_y = torch.full((1, 1, h, w), action[0])
                     action_x = torch.full((1, 1, h, w), action[1])
@@ -117,18 +124,59 @@ def train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, d
     return model
 
 
+def get_image_map(gridMap: Map):
+    hIm = gridMap.height
+    wIm = gridMap.width
+    im = np.zeros((hIm, wIm), dtype=np.uint8)
+    for i in range(gridMap.height):
+        for j in range(gridMap.width):
+            if (gridMap.cells[i][j] == 1):
+                im[i][j] = 1
+    return np.asarray(im)
+
+
+class City(Dataset):
+    def __init__(self, map_root):
+        map_paths = [os.path.join(map_root, path)
+                     for path in os.listdir(map_root)
+                     if ".map" in path]
+
+        task_maps = [ReadMapFromMovingAIFile(map_path)
+                     for map_path in map_paths]
+
+        self.image_maps = [get_image_map(task_map)
+                           for task_map in task_maps]
+
+    def __len__(self):
+        return len(self.image_maps)
+
+    def __getitem__(self, idx):
+        image_map = self.image_maps[idx]
+
+        return ToTensor()(image_map)
+
+
 def main():
     num_classes = 2
     num_epochs = 10
-    batch_size = 25
+    batch_size = 2
     offset = 10
+    num_pos4map = 20
+    city_ds = City(map_root="../data")
 
-    dataloaders = {'train': DataLoader(train_set, batch_size=batch_size, shuffle=True),
-                   'val': DataLoader(val_set, batch_size=batch_size, shuffle=False)}
+    dataloaders = {'train': DataLoader(city_ds, batch_size=batch_size, shuffle=True)} #, 'val': DataLoader(val_set, batch_size=batch_size, shuffle=False)}
+
+    input_data = dict()
+    input_data['pos'] = np.random.randint(256, size=(num_pos4map, 2))
+    input_data['act'] = np.random.randint(-1, 2, size=(num_pos4map, 2))
 
     model = UNet(num_classes)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    model = train_model(model, optimizer, dataloaders, num_epochs, offset, device)
+    model = train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, device)
+
+
+if __name__ == "__main__":
+    main()
 
