@@ -6,9 +6,10 @@ from torch.utils.data import DataLoader
 import copy
 import time
 import numpy as np
+import wandb
 
-from .model import UNet
-from .dataset import City
+from model import UNet
+from dataset import City
 
 def dice_loss(pred, target, smooth=1.):
     pred = pred.contiguous()
@@ -23,8 +24,7 @@ def dice_loss(pred, target, smooth=1.):
 
 def calc_loss(pred, target, metrics, bce_weight=0.5):
     bce = F.binary_cross_entropy_with_logits(pred, target)
-
-    pred = F.sigmoid(pred)
+    pred = torch.sigmoid(pred)
     dice = dice_loss(pred, target)
 
     loss = bce * bce_weight + dice * (1 - bce_weight)
@@ -32,6 +32,8 @@ def calc_loss(pred, target, metrics, bce_weight=0.5):
     metrics['bce'] += bce.data.cpu().numpy() * target.size(0)
     metrics['dice'] += dice.data.cpu().numpy() * target.size(0)
     metrics['loss'] += loss.data.cpu().numpy() * target.size(0)
+
+    wandb.log(metrics)
 
     return loss
 
@@ -48,8 +50,8 @@ def train_model(model, optimizer, dataloaders, num_epochs, offset, device):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = 1e10
     model = model.to(device)
-    h = 2 * offset + 1
-    w = 2 * offset + 1
+    h = 2 * offset + 2
+    w = 2 * offset + 2
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
@@ -66,23 +68,22 @@ def train_model(model, optimizer, dataloaders, num_epochs, offset, device):
             metrics = defaultdict(float)
             epoch_samples = 0
 
-            for map_ in enumerate(dataloaders[phase]):
+            for map_ in dataloaders[phase]:
                 # map_name = map_['name']
                 image_map = map_['image']
-                y, x = np.random.randint(256, size=(1, 2))[0]
-                inputs = image_map[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
-
-                action = np.random.randint(-1, 2, size=(1, 2))
-
-                action_y = torch.full((1, 1, h, w), action[0])
-                action_x = torch.full((1, 1, h, w), action[1])
-                action_yx = torch.cat((action_y, action_x), dim=0)
+                y, x = np.random.randint(offset+1, 256-offset-2, size=(1, 2))[0]
+                inputs = image_map[:, :, (y-offset):(y+offset+2), (x-offset):(x+offset+2)]
+                batch_size = 2
+                action = np.random.randint(-1, 2, size=(1, 2))[0]
+                action_y = torch.full((batch_size, 1, h, w), action[0])
+                action_x = torch.full((batch_size, 1, h, w), action[1])
+                action_yx = torch.cat((action_y, action_x), dim=1)
 
                 inputs = torch.cat((inputs, action_yx), dim=1)
 
                 y += action[0]
                 x += action[1]
-                labels = image_map[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
+                labels = image_map[:, :, (y-offset):(y+offset+2), (x-offset):(x+offset+2)]
 
                 inputs = inputs.to(device)
                 labels = labels.to(device)
@@ -110,6 +111,7 @@ def train_model(model, optimizer, dataloaders, num_epochs, offset, device):
             # deep copy the model
             if phase == 'val' and epoch_loss < best_loss:
                 print("saving best model")
+                wandb.log({"examples": [wandb.Image(i) for i in [outputs, labels]]})
                 best_loss = epoch_loss
                 best_model_wts = copy.deepcopy(model.state_dict())
 
@@ -123,14 +125,17 @@ def train_model(model, optimizer, dataloaders, num_epochs, offset, device):
 
 
 def main():
-    num_classes = 2
-    num_epochs = 10
-    batch_size = 2
-    offset = 10
-    num_pos4map = 20
-    city_ds = City(map_root="../data")
+    wandb.init(project="mcts-dl")
 
-    dataloaders = {'train': DataLoader(city_ds, batch_size=batch_size, shuffle=True)} #, 'val': DataLoader(val_set, batch_size=batch_size, shuffle=False)}
+    num_classes = 1
+    num_epochs = 100
+    batch_size = 2
+    offset = 20
+    num_pos4map = 20
+    city_ds = City(map_root="../data/street-map")
+
+    dataloaders = {'train': DataLoader(city_ds, batch_size=batch_size, shuffle=True),
+                   'val': DataLoader(city_ds, batch_size=batch_size, shuffle=False)}
 
     input_data = dict()
     input_data['pos'] = np.random.randint(256, size=(num_pos4map, 2))
@@ -141,6 +146,8 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model = train_model(model, optimizer, dataloaders, num_epochs, offset, device)
+
+    torch.save(model.state_dict(), "models/best_model.pth")
 
 
 if __name__ == "__main__":

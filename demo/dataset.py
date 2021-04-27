@@ -21,7 +21,7 @@ def get_image_map(gridMap: Map):
 
 class City(Dataset):
     def __init__(self, map_root):
-        self.map_paths = [path for path in os.listdir(map_root) if ".map" in path]
+        self.map_paths = [path for path in os.listdir(map_root) if "_256.map" in path]
 
         task_maps = [ReadMapFromMovingAIFile(os.path.join(map_root, map_path))
                      for map_path in self.map_paths]
