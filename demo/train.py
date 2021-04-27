@@ -8,7 +8,7 @@ import time
 import numpy as np
 
 from .model import UNet
-
+from .dataset import City
 
 def dice_loss(pred, target, smooth=1.):
     pred = pred.contiguous()
@@ -44,12 +44,10 @@ def print_metrics(metrics, epoch_samples, phase):
     print("{}: {}".format(phase, ", ".join(outputs)))
 
 
-def train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, device):
+def train_model(model, optimizer, dataloaders, num_epochs, offset, device):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = 1e10
     model = model.to(device)
-    positions = input_data['pos']
-    actions = input_data['act']
     h = 2 * offset + 1
     w = 2 * offset + 1
     for epoch in range(num_epochs):
@@ -69,35 +67,41 @@ def train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, d
             epoch_samples = 0
 
             for map_ in enumerate(dataloaders[phase]):
-                map_name = map_['name']
+                # map_name = map_['name']
                 image_map = map_['image']
-                for current, action in zip(positions[map_name], actions[map_name]):
-                    y, x = current
-                    inputs = image_map[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
+                y, x = np.random.randint(256, size=(1, 2))[0]
+                inputs = image_map[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
 
-                    action_y = torch.full((1, 1, h, w), action[0])
-                    action_x = torch.full((1, 1, h, w), action[1])
-                    action_xy = torch.cat((action_y, action_x), dim=0)
-                    inputs = torch.cat((inputs, action_xy), dim=1)
+                action = np.random.randint(-1, 2, size=(1, 2))
 
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
+                action_y = torch.full((1, 1, h, w), action[0])
+                action_x = torch.full((1, 1, h, w), action[1])
+                action_yx = torch.cat((action_y, action_x), dim=0)
 
-                    # zero the parameter gradients
-                    optimizer.zero_grad()
+                inputs = torch.cat((inputs, action_yx), dim=1)
 
-                    # forward
-                    # track history if only in train
-                    with torch.set_grad_enabled(phase == 'train'):
-                        outputs = model(inputs)
-                        loss = calc_loss(outputs, labels, metrics)
+                y += action[0]
+                x += action[1]
+                labels = image_map[:, :, (y-offset):(y+offset+1), (x-offset):(x+offset+1)]
 
-                        # backward + optimize only if in training phase
-                        if phase == 'train':
-                            loss.backward()
-                            optimizer.step()
+                inputs = inputs.to(device)
+                labels = labels.to(device)
 
-                    # statistics
+                # zero the parameter gradients
+                optimizer.zero_grad()
+
+                # forward
+                # track history if only in train
+                with torch.set_grad_enabled(phase == 'train'):
+                    outputs = model(inputs)
+                    loss = calc_loss(outputs, labels, metrics)
+
+                    # backward + optimize only if in training phase
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+
+                # statistics
                 epoch_samples += inputs.size(0)
 
             print_metrics(metrics, epoch_samples, phase)
@@ -118,9 +122,6 @@ def train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, d
     return model
 
 
-
-
-
 def main():
     num_classes = 2
     num_epochs = 10
@@ -139,7 +140,7 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    model = train_model(model, optimizer, dataloaders, input_data, num_epochs, offset, device)
+    model = train_model(model, optimizer, dataloaders, num_epochs, offset, device)
 
 
 if __name__ == "__main__":
