@@ -1,0 +1,23 @@
+project_name: 'hpp_dqn'
+episodes: 1000
+agent:
+  batch_size: 512
+  gamma: 0.99
+  eps_start: 0.2
+  eps_end: 0.01
+  eps_decay: 1000
+  target_update: 10
+  n_actions: 8
+  n_layers: 2
+  capacity: 100000
+  learning_rate: 0.001
+
+environment:
+  map_name: Berlin_0_256
+  task: 50
+  window_size: 21
+  goal_reward: 1
+  distance_reward_weight: -0.01
+  max_steps: 50
+  path: ../../dataset/256/
+
