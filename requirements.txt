@@ -2,3 +2,7 @@ numpy
 tqdm
 setuptools
 matplotlib
+jupyter
+torch
+torchvision
+wandb
