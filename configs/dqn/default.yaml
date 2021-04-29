@@ -1,5 +1,5 @@
 project_name: 'hpp_dqn'
-episodes: 2000
+episodes: 500
 agent:
   batch_size: 512
   gamma: 0.95
@@ -10,12 +10,12 @@ agent:
   n_actions: 8
   n_layers: 1
   capacity: 100000
-  learning_rate: 0.0001
+  learning_rate: 0.00005
 
 environment:
   map_name: Berlin_0_256
-  task: 50
-  window_size: 21
+  task: 100
+  window_size: 51
   goal_reward: 1
   distance_reward_weight: 0.05
   collision_reward: -2
