@@ -1,5 +1,6 @@
 import os.path
 import numpy as np
+from math import atan, pi
 
 from mcts_dl.utils.utils import Map, ReadMapFromMovingAIFile, ReadTasksFromMovingAIFile
 
@@ -7,7 +8,9 @@ from mcts_dl.utils.utils import Map, ReadMapFromMovingAIFile, ReadTasksFromMovin
 class GridWorld:
     map: Map
 
-    def __init__(self, map_name, task, window_size, goal_reward=1, distance_reward_weight=-1, path='.', max_steps=None):
+    def __init__(self, map_name, task, window_size, move_reward=0, goal_reward=1, distance_reward_weight=-1, collision_reward=0, path='.', max_steps=None):
+        self.collision_reward = collision_reward
+        self.move_reward = move_reward
         self.map_name = map_name
         self.path = path
 
@@ -24,7 +27,8 @@ class GridWorld:
         self.actions = np.array([[1, 1], [1, -1], [-1, -1], [-1, 1],
                                  [0, 1], [0, -1], [1, 0], [-1, 0]])
         self.vec = self.goal_position - self.start_position
-        self.vec = self.vec / self.task_length
+        self.max_length = self.map.width * (2**0.5)
+        self.signal = 1/(1 + np.linalg.norm(self.vec))
         self.reward = 0
         self.goal_reward = goal_reward
         self.distance_reward_weight = distance_reward_weight
@@ -41,16 +45,21 @@ class GridWorld:
     def act(self, action):
         new_position = self.position + self.actions[action]
         self.reward = 0
-        if self.in_bounds(new_position) and (self.reward_map[new_position[0], new_position[1]] != -1):
-            self.position = new_position
-
+        if self.in_bounds(new_position) and (self.map.cells[new_position[0]][new_position[1]] != 1):
             self.vec = self.goal_position - self.position
-            self.vec = self.vec / self.task_length
-            if self.reward_map[self.position[0], self.position[1]] == 0:
+            self.signal = 1 / (1 + np.linalg.norm(self.vec))
+            if np.all(self.position == self.goal_position):
                 self.done = True
                 self.reward = self.goal_reward
+            else:
+                self.reward = self.distance_reward_weight * (self.reward_map[self.position[0], self.position[1]] -
+                                                             self.reward_map[new_position[0], new_position[1]]
+                                                             ) + self.move_reward
 
-        self.reward += self.distance_reward_weight * (self.reward_map[self.position[0], self.position[1]] / self.task_length)
+            self.position = new_position
+        else:
+            self.done = True
+            self.reward = self.collision_reward
 
         self.step += 1
         if self.step >= self.max_steps:
@@ -65,7 +74,10 @@ class GridWorld:
 
     def observe(self):
         window = self.get_window(np.array(self.map.cells), self.position, self.window_size)
-        return (window, self.vec), self.reward, self.done
+        vec = np.zeros(2)
+        vec[0] = atan(self.vec[0] / (self.vec[1]+1e-12)) * 2/pi
+        vec[1] = self.signal
+        return (window, vec), self.reward, self.done
 
     def get_window(self, map, position, window_size: int):
         world = map[None]
@@ -111,9 +123,9 @@ if __name__ == '__main__':
 
     path = '../../dataset/256'
     map_name = 'Berlin_0_256'
-    task = 100
+    task = 50
     window = 21
-    env = GridWorld('Berlin_0_256', task, window, path=path)
+    env = GridWorld('Berlin_0_256', task, window, distance_reward_weight=0.05, path=path)
 
     plt.imshow(env.map.cells)
     plt.show()
@@ -121,8 +133,10 @@ if __name__ == '__main__':
     plt.imshow(obs[0][0].reshape((window, window)))
     plt.show()
 
-    for action in [0, 1, 2, 3, 4, 5, 6, 7]:
+    for action in [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]:
         env.act(action)
         obs = env.observe()
-        plt.imshow(obs[0][0].reshape((window, window)))
+        plt.imshow(env.render()[0])
         plt.show()
+        print(obs[0][1])
+        print(obs[1])

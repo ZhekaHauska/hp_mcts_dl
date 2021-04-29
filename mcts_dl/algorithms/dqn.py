@@ -5,7 +5,6 @@ import torch.optim as optim
 
 import math
 import random
-import numpy as np
 from collections import namedtuple
 from itertools import count
 from tqdm import tqdm
@@ -58,8 +57,14 @@ class DQN(nn.Module):
         out_h = conv_out_size(conv_out_size(conv_out_size(h, 2, 5, 3), 0, 3, 2), 0, 2, 1)
         out_w = conv_out_size(conv_out_size(conv_out_size(w, 2, 5, 3), 0, 3, 2), 0, 2, 1)
 
-        self.fc = nn.Linear(32 * out_h * out_w + 2, 64)
-        self.head = nn.Linear(64, outputs)
+        self.fc1 = nn.Linear(2, 16)
+        self.fc2 = nn.Linear(16, 32)
+        self.fc3 = nn.Linear(32 * out_h * out_w, 64)
+        self.fc4 = nn.Linear(96, 32)
+
+        self.drop1 = nn.Dropout(0.1)
+
+        self.head = nn.Linear(32, outputs)
 
     def forward(self, x, v):
         x = F.relu(self.conv1(x))
@@ -68,7 +73,13 @@ class DQN(nn.Module):
         x = self.bn2(x)
         x = F.relu(self.conv3(x))
         x = self.bn3(x)
-        x = F.relu(self.fc(torch.cat([x.view(x.size(0), -1), v], dim=-1)))
+        x = F.relu(self.fc3(x.view(x.size(0), -1)))
+
+        v = F.relu(self.fc1(v))
+        v = F.relu(self.fc2(v))
+        v = self.drop1(v)
+
+        x = F.relu(self.fc4(torch.cat([x, v], dim=-1)))
         return self.head(x)
 
 
@@ -105,8 +116,8 @@ class DQNAgent:
         self.capacity = capacity
         self.learning_rate = learning_rate
 
-        self.policy_net = DQNBase(self.n_input_layers, self.rows, self.cols, self.n_actions).to(self.device)
-        self.target_net = DQNBase(self.n_input_layers, self.rows, self.cols, self.n_actions).to(self.device)
+        self.policy_net = DQN(self.n_input_layers, self.rows, self.cols, self.n_actions).to(self.device)
+        self.target_net = DQN(self.n_input_layers, self.rows, self.cols, self.n_actions).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
@@ -130,7 +141,7 @@ class DQNAgent:
 
     def optimize_model(self):
         if len(self.memory) < self.batch_size:
-            return
+            return 0
         transitions = self.memory.sample(self.batch_size)
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
@@ -171,9 +182,10 @@ class DQNAgent:
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
-        for param in self.policy_net.parameters():
-            param.grad.data.clamp_(-1, 1)
+        # for param in self.policy_net.parameters():
+        #     param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
+        return loss.item()
 
 
 class DQNAgentRunner:
@@ -207,11 +219,13 @@ class DQNAgentRunner:
             last_state = obs[0]
             current_state = last_state
 
-            state = torch.from_numpy(np.concatenate((current_state - last_state, current_state), axis=0)[None])
+            #state = torch.from_numpy(np.concatenate((current_state - last_state, current_state), axis=0)[None])
+            state = torch.from_numpy(current_state[None])
             state = state.float().to(device=self.device)
             vector = torch.from_numpy(obs[1][None]).float().to(device=self.device)
 
             total_reward = 0
+            total_loss = 0
             if (i_episode % log_video_every == 0) and log:
                 animation = True
 
@@ -228,7 +242,8 @@ class DQNAgentRunner:
                 reward = torch.tensor([reward], device=self.device).float()
 
                 if not is_done:
-                    next_state = torch.from_numpy(np.concatenate((last_state, current_state), axis=0)[None])
+                    #next_state = torch.from_numpy(np.concatenate((current_state - last_state, current_state), axis=0)[None])
+                    next_state = torch.from_numpy(current_state[None])
                     next_state = next_state.float().to(device=self.device)
                     next_vector = torch.from_numpy(obs[1][None]).float().to(device=self.device)
                 else:
@@ -244,7 +259,7 @@ class DQNAgentRunner:
 
                 # Perform one step of the optimization (on the policy network)
                 if learn:
-                    self.agent.optimize_model()
+                    total_loss += self.agent.optimize_model()
 
                 if animation:
                     world, rmap = self.env.render()
@@ -257,15 +272,15 @@ class DQNAgentRunner:
                 self.agent.target_net.load_state_dict(self.agent.policy_net.state_dict())
 
             if log:
-                wandb.log({'reward': total_reward, 'duration': t + 1}, step=i_episode)
+                wandb.log({'reward': total_reward, 'duration': t + 1, 'loss': total_loss/(t+1)}, step=i_episode)
 
             if animation:
                 animation = False
-                with imageio.get_writer(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', mode='I', fps=2) as writer:
+                with imageio.get_writer(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', mode='I', fps=3) as writer:
                     for i in range(t):
                         image = imageio.imread(f'/tmp/{wandb.run.id}_episode_{i_episode}_step_{i}.png')
                         writer.append_data(image)
-                wandb.log({f'animation': wandb.Video(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', fps=2,
+                wandb.log({f'animation': wandb.Video(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', fps=3,
                                                        format='gif')}, step=i_episode)
             self.reward_history.append(total_reward)
 
@@ -276,4 +291,4 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = DQNAgentRunner(config)
-    runner.run(learn=True, log=True, log_video_every=20)
+    runner.run(learn=True, log=True, log_video_every=50)
