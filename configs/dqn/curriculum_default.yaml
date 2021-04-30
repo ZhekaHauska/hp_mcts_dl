@@ -1,0 +1,32 @@
+project_name: 'hpp_dqn_curriculum'
+max_episodes: -1
+eval_period_episodes: 400
+load_checkpoint: null
+checkpoint_path: './checkpoints'
+start_level: 0
+end_level: 92
+success_rate_next_level: 0.5
+maps: null
+
+agent:
+  batch_size: 512
+  gamma: 0.95
+  eps_start: 0.5
+  eps_end: 0.01
+  eps_decay: 10000
+  target_update: 10000 # step
+  n_actions: 8
+  n_layers: 1
+  capacity: 100000
+  learning_rate: 0.00005
+
+environment:
+  window_size: 51
+  goal_reward: 0
+  distance_reward_weight_forward: 0
+  distance_reward_weight_backward: 0
+  rest_distance_reward_weight: 1
+  collision_reward: 0
+  move_reward: 0
+  max_steps_mult: 5
+  path: ../../dataset/256/

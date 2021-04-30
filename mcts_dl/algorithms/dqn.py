@@ -1,10 +1,10 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
 import math
-import random
 from collections import namedtuple
 from itertools import count
 from tqdm import tqdm
@@ -12,6 +12,8 @@ import wandb
 import matplotlib.pyplot as plt
 
 import imageio
+import random
+import os
 
 from mcts_dl.environment.gridworld_pomdp import GridWorld
 
@@ -44,9 +46,9 @@ class ReplayMemory(object):
 class DQN(nn.Module):
     def __init__(self, input_channels, h, w, outputs):
         super(DQN, self).__init__()
-        self.conv1 = nn.Conv2d(input_channels, 16, padding=2, kernel_size=5, stride=3)
+        self.conv1 = nn.Conv2d(input_channels, 16, padding=3, kernel_size=6, stride=2)
         self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 32, padding=0, kernel_size=3, stride=2)
+        self.conv2 = nn.Conv2d(16, 32, padding=1, kernel_size=3, stride=1)
         self.bn2 = nn.BatchNorm2d(32)
         self.conv3 = nn.Conv2d(32, 32, padding=0, kernel_size=2, stride=1)
         self.bn3 = nn.BatchNorm2d(32)
@@ -54,17 +56,17 @@ class DQN(nn.Module):
         def conv_out_size(w, padding, kernel, stride):
             return int((w + 2 * padding - (kernel - 1) - 1) / stride + 1)
 
-        out_h = conv_out_size(conv_out_size(conv_out_size(h, 2, 5, 3), 0, 3, 2), 0, 2, 1)
-        out_w = conv_out_size(conv_out_size(conv_out_size(w, 2, 5, 3), 0, 3, 2), 0, 2, 1)
+        out_h = conv_out_size(conv_out_size(conv_out_size(h, 3, 6, 2), 1, 3, 1), 0, 2, 1)
+        out_w = conv_out_size(conv_out_size(conv_out_size(w, 3, 6, 2), 1, 3, 1), 0, 2, 1)
 
-        self.fc1 = nn.Linear(2, 16)
-        self.fc2 = nn.Linear(16, 32)
+        self.fc1 = nn.Linear(2, 32)
+        self.fc2 = nn.Linear(32, 64)
         self.fc3 = nn.Linear(32 * out_h * out_w, 64)
-        self.fc4 = nn.Linear(96, 32)
+        self.fc4 = nn.Linear(128, 64)
 
-        self.drop1 = nn.Dropout(0.1)
+        self.drop1 = nn.Dropout(0.05)
 
-        self.head = nn.Linear(32, outputs)
+        self.head = nn.Linear(64, outputs)
 
     def forward(self, x, v):
         x = F.relu(self.conv1(x))
@@ -182,8 +184,8 @@ class DQNAgent:
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
-        # for param in self.policy_net.parameters():
-        #     param.grad.data.clamp_(-1, 1)
+        for param in self.policy_net.parameters():
+            param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
         return loss.item()
 
@@ -285,10 +287,193 @@ class DQNAgentRunner:
             self.reward_history.append(total_reward)
 
 
+class DQNAgentCurriculum:
+    def __init__(self, config):
+        self.config = config
+        agent_conf = config['agent']
+        self.env_conf = config['environment']
+
+        agent_conf['window'] = self.env_conf['window_size']
+
+        self.max_episodes = config['max_episodes']  # for any level
+        self.evaluate_every_episodes = config['eval_period_episodes']
+
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.agent = DQNAgent(**agent_conf)
+
+        self.checkpoint_name = config['load_checkpoint']
+        self.checkpoint_path = config['checkpoint_path']
+        if self.checkpoint_name is not None:
+            checkpoint = torch.load(os.path.join(self.checkpoint_path, self.checkpoint_name))
+            self.agent.policy_net.load_state_dict(checkpoint['policy_state_dict'])
+            self.agent.target_net.load_state_dict(checkpoint['target_state_dict'])
+            self.agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        self.start_level = config['start_level']
+        self.end_level = config['end_level']
+        self.current_level = self.start_level
+        self.target_update = self.agent.target_update
+        self.agent.target_update = self.get_target_update()
+        self.success_rate_next_level = config['success_rate_next_level']
+
+        self.map_names = config['maps']
+        if self.map_names is None:
+            self.map_names = filter(lambda x: x.split('.')[-1] == 'map', os.listdir(self.env_conf['path']))
+            self.map_names = [x.split('.')[0] for x in self.map_names]
+
+        # 30 maps 30x920 tasks
+        # division 6 2 2
+        self.envs = self.load_envs()
+
+    def get_target_update(self):
+        return int(self.target_update + (0.1 - 1)*self.target_update * math.exp(-1. * self.current_level / 5))
+
+    def load_envs(self, n_maps=None, eval=False):
+        indices = list(range(len(self.map_names)))
+        if n_maps is not None:
+            indices = random.sample(indices, n_maps)
+
+        if eval:
+            start_task = self.current_level*10 + 6
+            end_task = self.current_level*10 + 8
+        else:
+            start_task = self.current_level*10
+            end_task = self.current_level*10 + 6
+
+        envs = list()
+        for i in indices:
+            for task in range(start_task, end_task):
+                self.env_conf['task'] = task
+                self.env_conf['map_name'] = self.map_names[i]
+                envs.append(GridWorld(**self.env_conf))
+        return envs
+
+    def evaluate(self):
+        envs = self.load_envs(eval=True)
+        completed = np.zeros(len(envs))
+        scores = np.zeros(len(envs))
+
+        for i, env in enumerate(envs):
+            is_success, score, duration = self.run_episode(env, i, log_metrics=False, learn=False)
+            completed[i] = int(is_success)
+            scores[i] = score
+
+        return completed.mean(), scores.mean()
+
+    def run_episode(self, env, i_episode, learn=True, log_metrics=True, log_animation=False):
+        env.reset()
+        obs, reward, is_done = env.observe()
+        last_state = obs[0]
+        current_state = last_state
+
+        state = torch.from_numpy(current_state[None])
+        state = state.float().to(device=self.device)
+        vector = torch.from_numpy(obs[1][None]).float().to(device=self.device)
+
+        total_reward = 0
+        total_loss = 0
+
+        for t in count():
+            # Select and perform an action
+            action = self.agent.make_action((state, vector))
+            env.act(action)
+            # Observe new state
+            obs, reward, is_done = env.observe()
+            current_state = obs[0]
+
+            total_reward += reward
+            reward = torch.tensor([reward], device=self.device).float()
+
+            if not is_done:
+                next_state = torch.from_numpy(current_state[None])
+                next_state = next_state.float().to(device=self.device)
+                next_vector = torch.from_numpy(obs[1][None]).float().to(device=self.device)
+            else:
+                next_state = None
+                next_vector = None
+
+                # Store the transition in memory
+            self.agent.memory.push(state, vector, action, next_state, next_vector, reward)
+
+            # Move to the next state
+            state = next_state
+            vector = next_vector
+
+            # Perform one step of the optimization (on the policy network)
+            if learn:
+                total_loss += self.agent.optimize_model()
+
+            if log_animation:
+                world, rmap = env.render()
+                plt.imsave(f'/tmp/{wandb.run.id}_episode_{i_episode}_step_{t}.png', world)
+
+            if is_done:
+                break
+        # Update the target network, copying all weights and biases in DQN
+        if ((self.agent.steps_done % self.agent.target_update) == 0) and learn:
+            self.agent.target_net.load_state_dict(self.agent.policy_net.state_dict())
+
+        if log_metrics:
+            wandb.log({'reward': total_reward, 'duration': t + 1, 'loss': total_loss / (t + 1)}, step=i_episode)
+
+        if log_animation:
+            animation = False
+            with imageio.get_writer(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', mode='I', fps=3) as writer:
+                for i in range(t):
+                    image = imageio.imread(f'/tmp/{wandb.run.id}_episode_{i_episode}_step_{i}.png')
+                    writer.append_data(image)
+            wandb.log({f'animation': wandb.Video(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', fps=3,
+                                                 format='gif')}, step=i_episode)
+
+        return env.is_success, total_reward, t+1
+
+    def run(self, learn=True, log=True, log_video_every=100):
+        if log:
+            run = wandb.init(project=self.config['project_name'], config=self.config)
+            wandb.log({'level': self.current_level}, step=0)
+
+        episode = 0
+        while self.current_level <= self.end_level:
+            # choose map and task
+            env = random.choice(self.envs)
+            self.run_episode(env,
+                             log_metrics=log,
+                             log_animation=((episode % log_video_every) == 0) and log,
+                             i_episode=episode,
+                             learn=learn)
+
+            if ((episode % self.evaluate_every_episodes) == 0) or (episode == self.max_episodes):
+                success_rate, average_score = self.evaluate()
+                if log:
+                    wandb.log({'eval_success_rate': success_rate, 'eval_score': average_score}, step=episode)
+                if success_rate >= self.success_rate_next_level:
+                    self.current_level += 1
+                    self.envs = self.load_envs()
+                    self.agent.target_update = self.get_target_update()
+                    if log:
+                        wandb.log({'level': self.current_level}, step=episode)
+
+                torch.save({
+                    'episode': episode,
+                    'level': self.current_level,
+                    'policy_state_dict': self.agent.policy_net.state_dict(),
+                    'target_state_dict': self.agent.target_net.state_dict(),
+                    'optimizer_state_dict': self.agent.optimizer.state_dict(),
+                    'score': average_score,
+                    'success_rate': success_rate
+                }, os.path.join(self.checkpoint_path,
+                                f'{episode}_{self.current_level}_{round(success_rate, 2)}_{wandb.run.id}.pt'))
+
+            if episode == self.max_episodes:
+                break
+
+            episode += 1
+
+
 if __name__ == '__main__':
     import yaml
-    with open('../../configs/dqn/default.yaml', 'r') as file:
+    with open('../../configs/dqn/curriculum_default.yaml', 'r') as file:
         config = yaml.load(file, yaml.Loader)
 
-    runner = DQNAgentRunner(config)
-    runner.run(learn=True, log=True, log_video_every=50)
+    runner = DQNAgentCurriculum(config)
+    runner.run(learn=True, log=True, log_video_every=250)

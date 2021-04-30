@@ -8,7 +8,10 @@ from mcts_dl.utils.utils import Map, ReadMapFromMovingAIFile, ReadTasksFromMovin
 class GridWorld:
     map: Map
 
-    def __init__(self, map_name, task, window_size, move_reward=0, goal_reward=1, distance_reward_weight=-1, collision_reward=0, path='.', max_steps=None):
+    def __init__(self, map_name, task, window_size, max_steps_mult=3, move_reward=0, goal_reward=1,
+                 distance_reward_weight_forward=1, distance_reward_weight_backward=-1,
+                 rest_distance_reward_weight=0, collision_reward=0, path='.',
+                 max_steps=None):
         self.collision_reward = collision_reward
         self.move_reward = move_reward
         self.map_name = map_name
@@ -20,6 +23,7 @@ class GridWorld:
 
         self.window_size = window_size
         self.done = False
+        self.is_success = False
         self.task_length = length
         self.position = np.array([i_start, j_start])
         self.start_position = np.array([i_start, j_start])
@@ -27,13 +31,15 @@ class GridWorld:
         self.actions = np.array([[1, 1], [1, -1], [-1, -1], [-1, 1],
                                  [0, 1], [0, -1], [1, 0], [-1, 0]])
         self.vec = self.goal_position - self.start_position
-        self.max_length = self.map.width * (2**0.5)
-        self.signal = 1/(1 + np.linalg.norm(self.vec))
+        self.max_length = self.map.width * (2 ** 0.5)
+        self.signal = 1 / (1 + np.linalg.norm(self.vec))
         self.reward = 0
         self.goal_reward = goal_reward
-        self.distance_reward_weight = distance_reward_weight
+        self.distance_reward_weight_forward = distance_reward_weight_forward
+        self.distance_reward_weight_backward = distance_reward_weight_backward
+        self.rest_distance_reward_weight = rest_distance_reward_weight
         if max_steps is None:
-            self.max_steps = length * 10
+            self.max_steps = length * max_steps_mult
         else:
             self.max_steps = max_steps
         self.step = 0
@@ -41,6 +47,7 @@ class GridWorld:
         self.reward_map = np.load(
             os.path.join(self.path, self.map_name, f'{i_goal}_{j_goal}.rmap.npy')
         )
+        self.reward_map /= self.reward_map.max()
 
     def act(self, action):
         new_position = self.position + self.actions[action]
@@ -50,11 +57,20 @@ class GridWorld:
             self.signal = 1 / (1 + np.linalg.norm(self.vec))
             if np.all(self.position == self.goal_position):
                 self.done = True
+                self.is_success = True
                 self.reward = self.goal_reward
             else:
-                self.reward = self.distance_reward_weight * (self.reward_map[self.position[0], self.position[1]] -
-                                                             self.reward_map[new_position[0], new_position[1]]
-                                                             ) + self.move_reward
+                distance_reward = (self.reward_map[self.position[0], self.position[1]] -
+                                   self.reward_map[new_position[0], new_position[1]]
+                                   )
+                rest_distance_reward = self.reward_map[new_position[0], new_position[1]]
+                rest_distance_reward *= self.rest_distance_reward_weight
+                if distance_reward <= 0:
+                    distance_reward *= self.distance_reward_weight_backward
+                else:
+                    distance_reward *= self.distance_reward_weight_forward
+
+                self.reward = distance_reward + self.move_reward + rest_distance_reward
 
             self.position = new_position
         else:
@@ -69,13 +85,14 @@ class GridWorld:
         self.step = 0
         self.position = self.start_position
         self.done = False
+        self.is_success = False
         self.reward = 0
         self.vec = self.goal_position - self.start_position
 
     def observe(self):
         window = self.get_window(np.array(self.map.cells), self.position, self.window_size)
         vec = np.zeros(2)
-        vec[0] = atan(self.vec[0] / (self.vec[1]+1e-12)) * 2/pi
+        vec[0] = atan(self.vec[0] / (self.vec[1] + 1e-12)) * 2 / pi
         vec[1] = self.signal
         return (window, vec), self.reward, self.done
 
