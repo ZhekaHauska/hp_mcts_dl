@@ -3,7 +3,7 @@ max_episodes: -1
 eval_period_episodes: 400
 load_checkpoint: null
 checkpoint_path: './checkpoints'
-start_level: 0
+start_level: 5
 end_level: 92
 success_rate_next_level: 0.5
 maps: null
@@ -18,7 +18,7 @@ agent:
   n_actions: 8
   n_layers: 1
   capacity: 100000
-  learning_rate: 0.00005
+  learning_rate: 0.001
 
 environment:
   window_size: 51

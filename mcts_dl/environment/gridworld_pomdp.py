@@ -32,7 +32,7 @@ class GridWorld:
                                  [0, 1], [0, -1], [1, 0], [-1, 0]])
         self.vec = self.goal_position - self.start_position
         self.max_length = self.map.width * (2 ** 0.5)
-        self.signal = 1 / (1 + np.linalg.norm(self.vec))
+        self.signal = np.linalg.norm(self.vec)/self.max_length
         self.reward = 0
         self.goal_reward = goal_reward
         self.distance_reward_weight_forward = distance_reward_weight_forward
@@ -48,13 +48,14 @@ class GridWorld:
             os.path.join(self.path, self.map_name, f'{i_goal}_{j_goal}.rmap.npy')
         )
         self.reward_map /= self.reward_map.max()
+        self.reward_map = 1 - self.reward_map
 
     def act(self, action):
         new_position = self.position + self.actions[action]
         self.reward = 0
         if self.in_bounds(new_position) and (self.map.cells[new_position[0]][new_position[1]] != 1):
             self.vec = self.goal_position - self.position
-            self.signal = 1 / (1 + np.linalg.norm(self.vec))
+            self.signal = np.linalg.norm(self.vec)/self.max_length
             if np.all(self.position == self.goal_position):
                 self.done = True
                 self.is_success = True
@@ -142,7 +143,7 @@ if __name__ == '__main__':
     map_name = 'Berlin_0_256'
     task = 50
     window = 21
-    env = GridWorld('Berlin_0_256', task, window, distance_reward_weight=0.05, path=path)
+    env = GridWorld('Berlin_0_256', task, window, path=path)
 
     plt.imshow(env.map.cells)
     plt.show()
