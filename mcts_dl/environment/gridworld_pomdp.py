@@ -34,6 +34,8 @@ class GridWorld:
         self.max_length = self.map.width * (2 ** 0.5)
         self.signal = np.linalg.norm(self.vec)/self.max_length
         self.reward = 0
+        self.value = 0
+        self.action_probs = np.ones(self.actions.shape[0])/self.actions.shape[0]
         self.goal_reward = goal_reward
         self.distance_reward_weight_forward = distance_reward_weight_forward
         self.distance_reward_weight_backward = distance_reward_weight_backward
@@ -53,10 +55,8 @@ class GridWorld:
     def act(self, action):
         new_position = self.position + self.actions[action]
         self.reward = 0
-        if self.in_bounds(new_position) and (self.map.cells[new_position[0]][new_position[1]] != 1):
-            self.vec = self.goal_position - self.position
-            self.signal = np.linalg.norm(self.vec)/self.max_length
-            if np.all(self.position == self.goal_position):
+        if tuple(new_position) in self.map.GetNeighbors(*self.position):
+            if np.all(new_position == self.goal_position):
                 self.done = True
                 self.is_success = True
                 self.reward = self.goal_reward
@@ -64,23 +64,43 @@ class GridWorld:
                 distance_reward = (self.reward_map[self.position[0], self.position[1]] -
                                    self.reward_map[new_position[0], new_position[1]]
                                    )
-                rest_distance_reward = self.reward_map[new_position[0], new_position[1]]
-                rest_distance_reward *= self.rest_distance_reward_weight
                 if distance_reward <= 0:
                     distance_reward *= self.distance_reward_weight_backward
                 else:
                     distance_reward *= self.distance_reward_weight_forward
 
-                self.reward = distance_reward + self.move_reward + rest_distance_reward
+                self.reward = distance_reward + self.move_reward
 
             self.position = new_position
+            self.vec = self.goal_position - self.position
+            self.signal = np.linalg.norm(self.vec) / self.max_length
         else:
             self.done = True
             self.reward = self.collision_reward
 
+        rest_distance_reward = self.reward_map[self.position[0], self.position[1]]
+        rest_distance_reward *= self.rest_distance_reward_weight
+        self.reward += rest_distance_reward
+
         self.step += 1
         if self.step >= self.max_steps:
             self.done = True
+
+    def get_action_probs(self):
+        self.action_probs = np.zeros(self.actions.shape[0])
+        positions = self.position + self.actions
+        neighbours = self.map.GetNeighbors(*self.position)
+        values = np.zeros(self.actions.shape[0]) - 1
+        for i, pos in enumerate(positions):
+            if tuple(pos) in neighbours:
+                values[i] = self.reward_map[pos[0], pos[1]]
+        self.action_probs[np.argmax(values)] = 1
+        self.action_probs /= self.action_probs.sum()
+        return self.action_probs
+
+    def get_value(self):
+        self.value = self.reward_map[self.position[0], self.position[1]]
+        return self.value
 
     def reset(self):
         self.step = 0
@@ -88,7 +108,10 @@ class GridWorld:
         self.done = False
         self.is_success = False
         self.reward = 0
+        self.value = 0
         self.vec = self.goal_position - self.start_position
+        self.action_probs = np.ones(self.actions.shape[0])/self.actions.shape[0]
+        self.signal = np.linalg.norm(self.vec)/self.max_length
 
     def observe(self):
         window = self.get_window(np.array(self.map.cells), self.position, self.window_size)
@@ -151,10 +174,16 @@ if __name__ == '__main__':
     plt.imshow(obs[0][0].reshape((window, window)))
     plt.show()
 
-    for action in [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]:
+    for action in [1]*10:
         env.act(action)
         obs = env.observe()
+        value = env.get_value()
+        probs = env.get_action_probs()
         plt.imshow(env.render()[0])
         plt.show()
+        # plt.imshow(env.render()[1])
+        # plt.show()
         print(obs[0][1])
-        print(obs[1])
+        #print(obs[1])
+        print(value, probs)
+        print(f'vector {env.vec}')

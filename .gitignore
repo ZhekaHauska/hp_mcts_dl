@@ -2,7 +2,7 @@ data/
 models/
 wandb/
 mcts_dl/algorithms/wandb/
-mcts_dl/algorithms/checkpoints
+mcts_dl/algorithms/checkpoints/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
