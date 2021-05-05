@@ -13,7 +13,6 @@ def calc_iou(outputs, targets):
     SMOOTH = 1e-6
     outputs = outputs.squeeze(1) > 0.5
     targets = targets.squeeze(1) > 0.5
-
     intersection = (outputs & targets).float().sum((1, 2))
     union = (outputs | targets).float().sum((1, 2))
 
@@ -50,7 +49,7 @@ class Runner:
         self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=self.batch_size, shuffle=True),
                              'val': DataLoader(data_set['val'], batch_size=self.batch_size, shuffle=False)}
         self.offset = 21
-        self.num_steps = 100
+        self.num_steps = 1000
         self.loss_func = nn.BCELoss()
 
     # check random seed
@@ -113,7 +112,7 @@ class Runner:
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
 
-                iou = calc_iou(targets.cpu().detach(), targets.cpu().detach())
+                iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach())
                 epoch_iou += iou
 
         epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps * self.batch_size)
