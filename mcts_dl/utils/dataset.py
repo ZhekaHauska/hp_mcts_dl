@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from torchvision.transforms import ToTensor
 import torch
 from torch.utils.data import Dataset
 from .utils import ReadMapFromMovingAIFile, Map
@@ -18,8 +17,8 @@ def grid_map2image(gridMap: Map):
 
 
 class City(Dataset):
-    def __init__(self, map_root):
-        self.map_paths = [path for path in os.listdir(map_root) if "_256.map" in path]
+    def __init__(self, map_root, map_size):
+        self.map_paths = [path for path in os.listdir(map_root) if f"_{map_size}.map" in path]
 
         task_maps = [ReadMapFromMovingAIFile(os.path.join(map_root, map_path))
                      for map_path in self.map_paths]

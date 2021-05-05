@@ -58,26 +58,36 @@ class ModelNetwork(nn.Module):
 
 
 class Runner:
-    def __init__(self, data_set):
-        self.offset = 10
+    def __init__(self, config):
+        self.config = config
+        self.map_size = config['map_size']
+        train_ds = City(map_root="../../data/train", map_size=self.map_size)
+        val_ds = City(map_root="../../data/val", map_size=self.map_size)
+        test_ds = City(map_root="../../data/test", map_size=self.map_size)
+
+        data_set = {'train': train_ds,
+                    'val': val_ds,
+                    'test': test_ds}
+
+        self.offset = config['offset']
 
         window_size = 2 * self.offset + 1
         self.model = ModelNetwork(window_size)
 
         self.loss_func = nn.BCELoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.batch_size = 10
-        self.num_epochs = 100
+        self.batch_size = config['batch_size']
+        self.num_epochs = config['num_epochs']
         self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=self.batch_size, shuffle=True),
-                             'val': DataLoader(data_set['val'], batch_size=self.batch_size, shuffle=False)}
+                             'val': DataLoader(data_set['val'], batch_size=self.batch_size, shuffle=False),
+                             'test': DataLoader(data_set['test'], batch_size=self.batch_size, shuffle=False)}
 
-        self.num_steps = 100
+        self.num_steps = config['num_steps']
 
-    # check random seed
     def sample(self, image_map):
-        y0, x0 = np.random.randint(self.offset + 1, 256 - self.offset - 1, size=(1, 2))[0]
+        y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
         inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
 
         targets = torch.zeros_like(inputs)
@@ -151,7 +161,10 @@ class Runner:
 
         return epoch_loss, epoch_iou, outputs, targets
 
-    def run(self):
+    def run(self, log=True):
+        if log:
+            wandb.init(project=self.config['project_name'], config=self.config)
+
         best_model_wts = copy.deepcopy(self.model.state_dict())
         best_loss = 1e10
 
@@ -175,18 +188,17 @@ class Runner:
                                                                                             ['pred', 'true'])]})
 
         self.model.load_state_dict(best_model_wts)
-        return self.model
+        # torch.save(self.model.state_dict(), "./checkpoints/best_model.pth")
 
 
 if __name__ == '__main__':
-    wandb.init(project="mcts-dl")
+    import yaml
 
-    city_ds = City(map_root="../../data/street-map")
-    data_set = {'train': city_ds,
-                'val': city_ds}
+    with open('../../configs/model_network/default.yaml', 'r') as file:
+        config = yaml.load(file, yaml.Loader)
 
-    runner = Runner(data_set)
-    best_model = runner.run()
+    runner = Runner(config)
+    runner.run()
 
-    torch.save(best_model.state_dict(), "./checkpoints/best_model.pth")
+
 

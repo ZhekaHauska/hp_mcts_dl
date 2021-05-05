@@ -1,0 +1,9 @@
+project_name: 'mcts_dl_model_network'
+map_size: 256
+offset: 10
+batch_size: 10
+lr: 1e-4
+num_epochs: 100
+num_steps: 10000
+
+
