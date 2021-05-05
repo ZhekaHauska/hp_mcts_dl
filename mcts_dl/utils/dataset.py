@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from torchvision.transforms import ToTensor
+import torch
 from torch.utils.data import Dataset
 from .utils import ReadMapFromMovingAIFile, Map
 
@@ -32,7 +33,8 @@ class City(Dataset):
         sample = dict()
         name = self.map_paths[idx]
         image_map = self.image_maps[idx]
+        image_map = torch.from_numpy(image_map).float()
         sample['name'] = name
-        sample['image'] = ToTensor()(image_map)
+        sample['image'] = torch.unsqueeze(image_map, 0)
 
         return sample

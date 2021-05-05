@@ -9,10 +9,11 @@ import wandb
 from mcts_dl.utils.dataset import City
 
 
-def calc_iou(outputs, targets):
+def calc_iou(outputs, targets, threshold=0.5):
     SMOOTH = 1e-6
-    outputs = outputs.squeeze(1) > 0.5
-    targets = targets.squeeze(1) > 0.5
+    outputs = outputs.squeeze(1) > threshold
+    targets = targets.squeeze(1) > threshold
+
     intersection = (outputs & targets).float().sum((1, 2))
     union = (outputs | targets).float().sum((1, 2))
 
@@ -115,7 +116,7 @@ class Runner:
                 loss.backward()
                 self.optimizer.step()
 
-                iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach())
+                iou = calc_iou(targets.cpu().detach(), targets.cpu().detach())
                 epoch_iou += iou
 
         epoch_loss = epoch_loss / (len(self.data_loaders['train']) * self.num_steps * self.batch_size)
@@ -142,7 +143,7 @@ class Runner:
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
 
-                iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach())
+                iou = calc_iou(targets.cpu().detach(), targets.cpu().detach())
                 epoch_iou += iou
 
         epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps * self.batch_size)
@@ -169,7 +170,8 @@ class Runner:
             if val_loss < best_loss:
                 best_loss = val_loss
                 best_model_wts = copy.deepcopy(self.model.state_dict())
-                wandb.log({f"epoch = {epoch}": [wandb.Image(im, caption=c) for im, c in zip([outputs, targets],
+
+                wandb.log({f"epoch = {epoch}": [wandb.Image(im, caption=c) for im, c in zip([outputs[0], targets[0]],
                                                                                             ['pred', 'true'])]})
 
         self.model.load_state_dict(best_model_wts)
@@ -186,5 +188,5 @@ if __name__ == '__main__':
     runner = Runner(data_set)
     best_model = runner.run()
 
-    torch.save(best_model.state_dict(), "models/best_model.pth")
+    torch.save(best_model.state_dict(), "./checkpoints/best_model.pth")
 
