@@ -1,20 +1,17 @@
-import sys
-sys.path.append("../mcts_dl")
-
 import os
 import numpy as np
 from torchvision.transforms import ToTensor
 from torch.utils.data import Dataset
-from utils.utils import ReadMapFromMovingAIFile, Map
+from .utils import ReadMapFromMovingAIFile, Map
 
 
-def get_image_map(gridMap: Map):
+def grid_map2image(gridMap: Map):
     hIm = gridMap.height
     wIm = gridMap.width
     im = np.zeros((hIm, wIm), dtype=np.uint8)
-    for i in range(gridMap.height):
-        for j in range(gridMap.width):
-            if (gridMap.cells[i][j] == 1):
+    for i in range(hIm):
+        for j in range(wIm):
+            if gridMap.cells[i][j] == 1:
                 im[i][j] = 1
     return np.asarray(im)
 
@@ -26,8 +23,7 @@ class City(Dataset):
         task_maps = [ReadMapFromMovingAIFile(os.path.join(map_root, map_path))
                      for map_path in self.map_paths]
 
-        self.image_maps = [get_image_map(task_map)
-                           for task_map in task_maps]
+        self.image_maps = [grid_map2image(task_map) for task_map in task_maps]
 
     def __len__(self):
         return len(self.image_maps)
