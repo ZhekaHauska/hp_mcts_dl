@@ -24,7 +24,7 @@ def calc_iou(outputs, targets):
 class ModelNetwork(nn.Module):
     def __init__(self, ):
         super(ModelNetwork, self).__init__()
-        self.model = nn.Sequential(
+        self.input = nn.Sequential(
             nn.Conv2d(1, 4, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(4, 8, kernel_size=3, padding=1),
@@ -34,8 +34,11 @@ class ModelNetwork(nn.Module):
             nn.Conv2d(4, 1, kernel_size=3, padding=1),
             nn.Sigmoid()
         )
+        self.action = nn.Sequential(
+            nn.Linear(2, 100),
+        )
 
-    def forward(self, x):
+    def forward(self, inputs, actions):
         return self.model(x)
 
 
@@ -57,12 +60,16 @@ class Runner:
         y0, x0 = np.random.randint(self.offset + 1, 256 - self.offset - 1, size=(1, 2))[0]
         inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
 
-        dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
-        y = y0 + dy
-        x = x0 + dx
-        targets = image_map[:, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
+        targets = torch.zeros_like(inputs)
+        actions = torch.zeros(inputs.shape[0])
+        for i in range(inputs.shape[0]):
+            dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
+            y = y0 + dy
+            x = x0 + dx
+            targets[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
+            actions[i] = torch.tensor([dy, dx], dtype=torch.int8)
 
-        return inputs, targets
+        return inputs, targets, actions
 
     def train(self):
         self.model.train()
@@ -72,12 +79,13 @@ class Runner:
         for batch in self.data_loaders['train']:
             image_map = batch['image']
             for step in range(self.num_steps):
-                inputs, targets = self.sample(image_map)
+                inputs, targets, actions = self.sample(image_map)
 
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
+                actions = actions.to(self.device)
 
-                outputs = self.model(inputs)
+                outputs = self.model(inputs, actions)
 
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
@@ -102,12 +110,13 @@ class Runner:
         for batch in self.data_loaders['val']:
             image_map = batch['image']
             for step in range(self.num_steps):
-                inputs, targets = self.sample(image_map)
+                inputs, targets, actions = self.sample(image_map)
 
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
+                actions = actions.to(self.device)
 
-                outputs = self.model(inputs)
+                outputs = self.model(inputs, actions)
 
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
