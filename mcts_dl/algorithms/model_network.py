@@ -8,6 +8,28 @@ import wandb
 
 from mcts_dl.utils.dataset import City
 
+def iou(true_mask, pred_mask, average):
+    classes = np.unique(true_mask)
+
+    TP = []
+    FP = []
+    FN = []
+    for class_ in classes:
+        pos_pred = pred_mask == class_
+        neg_pred = pred_mask != class_
+        pos_true = true_mask == class_
+        neg_true = true_mask != class_
+
+        tp = sum(pos_true[pos_pred])
+        fp = sum(neg_true[pos_pred])
+        fn = sum(pos_true[neg_pred])
+
+        TP.append(tp)
+        FP.append(fp)
+        FN.append(fn)
+
+    if average == "binary":
+        iou_ = TP[-1] / (TP[-1] + FP[-1] + FN[-1])  # pos_label == 1
 
 def calc_iou(outputs, targets, threshold=0.5):
     SMOOTH = 1e-6
