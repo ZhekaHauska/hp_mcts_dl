@@ -12,9 +12,44 @@ from mcts_dl.utils.dataset import City
 from mcts_dl.utils.iou import calc_iou
 
 
-class ModelNetwork(nn.Module):
+class ModelNetworkWindow(nn.Module):
     def __init__(self, window_size):
         super(ModelNetwork, self).__init__()
+        self.input = nn.Sequential(
+            nn.Conv2d(1, 4, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(4, 8, kernel_size=3, padding=1),
+            nn.ReLU()
+        )
+
+        self.action = nn.Sequential(
+            nn.Linear(2, 128),
+            nn.ReLU(),
+            nn.Linear(128, window_size*window_size),
+            nn.ReLU()
+        )
+
+        self.output = nn.Sequential(
+            nn.Conv2d(8+1, 4, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(4, 1, kernel_size=3, padding=1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, inputs, actions):
+        inputs_ = self.input(inputs)
+        actions_ = self.action(actions)
+        actions_ = actions_.view(inputs.shape)
+
+        outputs = torch.cat((inputs_, actions_), dim=1)
+        outputs = self.output(outputs)
+
+        return outputs
+
+
+class ModelNetworkBorder(nn.Module):
+    def __init__(self, window_size):
+        super(ModelNetworkBorder, self).__init__()
         self.input = nn.Sequential(
             nn.Conv2d(1, 4, kernel_size=3, padding=1),
             nn.ReLU(),
