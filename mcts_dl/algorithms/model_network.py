@@ -14,7 +14,7 @@ from mcts_dl.utils.iou import calc_iou
 
 class ModelNetworkWindow(nn.Module):
     def __init__(self, window_size):
-        super(ModelNetwork, self).__init__()
+        super(ModelNetworkWindow, self).__init__()
         self.input = nn.Sequential(
             nn.Conv2d(1, 4, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -25,12 +25,12 @@ class ModelNetworkWindow(nn.Module):
         self.action = nn.Sequential(
             nn.Linear(2, 128),
             nn.ReLU(),
-            nn.Linear(128, window_size*window_size),
+            nn.Linear(128, window_size * window_size),
             nn.ReLU()
         )
 
         self.output = nn.Sequential(
-            nn.Conv2d(8+1, 4, kernel_size=3, padding=1),
+            nn.Conv2d(8 + 1, 4, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(4, 1, kernel_size=3, padding=1),
             nn.Sigmoid()
@@ -51,32 +51,31 @@ class ModelNetworkBorder(nn.Module):
     def __init__(self, window_size):
         super(ModelNetworkBorder, self).__init__()
         self.input = nn.Sequential(
-            nn.Conv2d(1, 4, kernel_size=3, padding=1),
+            nn.Conv2d(1, 2, 3),
             nn.ReLU(),
-            nn.Conv2d(4, 8, kernel_size=3, padding=1),
+            nn.Conv2d(2, 4, 3),
             nn.ReLU()
         )
 
         self.action = nn.Sequential(
-            nn.Linear(2, 128),
-            nn.ReLU(),
-            nn.Linear(128, window_size*window_size),
+            nn.Linear(2, 16),
             nn.ReLU()
         )
 
         self.output = nn.Sequential(
-            nn.Conv2d(8+1, 4, kernel_size=3, padding=1),
+            nn.Linear(1156 + 16, 256),
             nn.ReLU(),
-            nn.Conv2d(4, 1, kernel_size=3, padding=1),
+            nn.Linear(256, 4 * window_size + 4),
             nn.Sigmoid()
         )
 
     def forward(self, inputs, actions):
-        inputs_ = self.input(inputs)
-        actions_ = self.action(actions)
-        actions_ = actions_.view(inputs.shape)
+        inputs = self.input(inputs)
+        actions = self.action(actions)
 
-        outputs = torch.cat((inputs_, actions_), dim=1)
+        inputs = inputs.view(inputs.shape[0], -1)
+
+        outputs = torch.cat((inputs, actions), dim=-1)
         outputs = self.output(outputs)
 
         return outputs
@@ -98,7 +97,7 @@ class Runner:
         self.offset = config['offset']
 
         self.window_size = 2 * self.offset + 1
-        self.model = ModelNetwork(self.window_size)
+        self.model = ModelNetworkBorder(self.window_size)
 
         self.loss_func = nn.BCELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
@@ -114,7 +113,7 @@ class Runner:
         self.threshold = config['threshold']
         self.checkpoints_dir = f"{config['checkpoints_dir']}/offset_{config['offset']}_num_steps_{config['num_steps']}"
 
-    def sample(self, image_map):
+    def sample_window(self, image_map):
         y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
         inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
 
@@ -125,7 +124,32 @@ class Runner:
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
             y = y0 + dy
             x = x0 + dx
-            targets[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
+            targets[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1),
+                         (x - self.offset):(x + self.offset + 1)]
+            actions[i][0] = dy
+            actions[i][1] = dx
+
+        return inputs, targets, actions
+
+    def sample_border(self, image_map):
+        y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
+        inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
+
+        targets = torch.zeros((inputs.shape[0], 4 * self.window_size + 4))
+        actions = torch.zeros((inputs.shape[0], 2))
+
+        for i in range(inputs.shape[0]):
+            dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
+            y = y0
+            x = x0
+
+            up = image_map[i, :, (y - self.offset - 1), (x - self.offset - 1):(x + self.offset + 2)]
+            down = image_map[i, :, (y + self.offset + 1), (x - self.offset - 1):(x + self.offset + 2)]
+
+            right = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x + self.offset + 1)]
+            left = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x - self.offset - 1)]
+
+            targets[i] = torch.cat((up, right, down, left), dim=-1)
             actions[i][0] = dy
             actions[i][1] = dx
 
@@ -139,7 +163,7 @@ class Runner:
         for batch in self.data_loaders['train']:
             image_map = batch['image']
             for step in range(self.num_steps):
-                inputs, targets, actions = self.sample(image_map)
+                inputs, targets, actions = self.sample_border(image_map)
 
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
@@ -154,8 +178,8 @@ class Runner:
                 loss.backward()
                 self.optimizer.step()
 
-                iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                epoch_iou += iou
+                #iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                #epoch_iou += iou
 
         epoch_loss = epoch_loss / (len(self.data_loaders['train']) * self.num_steps)
         epoch_iou = epoch_iou / (len(self.data_loaders['train']) * self.num_steps)
@@ -170,7 +194,7 @@ class Runner:
         for batch in self.data_loaders['val']:
             image_map = batch['image']
             for step in range(self.num_steps):
-                inputs, targets, actions = self.sample(image_map)
+                inputs, targets, actions = self.sample_border(image_map)
 
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
@@ -181,21 +205,21 @@ class Runner:
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
 
-                iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                epoch_iou += iou
+                #iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                #epoch_iou += iou
 
         epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
-        epoch_iou = epoch_iou / (len(self.data_loaders['val']) * self.num_steps)
+        #epoch_iou = epoch_iou / (len(self.data_loaders['val']) * self.num_steps)
 
         log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
 
-        output = outputs[0].cpu().detach().squeeze() > self.threshold
-        target = targets[0].cpu().detach().squeeze() > self.threshold
+        #output = outputs[0].cpu().detach().squeeze() > self.threshold
+        #target = targets[0].cpu().detach().squeeze() > self.threshold
 
-        intersection = (output & target)
-        log_window[output] = [255, 0, 0]
-        log_window[target] = [0, 255, 0]
-        log_window[intersection] = [255, 255, 255]
+        #intersection = (output & target)
+        #log_window[output] = [255, 0, 0]
+        #log_window[target] = [0, 255, 0]
+        #log_window[intersection] = [255, 255, 255]
 
         return epoch_loss, epoch_iou, log_window
 
@@ -250,7 +274,4 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run()
-
-
-
+    runner.run(True)
