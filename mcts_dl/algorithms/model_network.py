@@ -79,7 +79,6 @@ class Runner:
         self.threshold = config['threshold']
         self.checkpoints_dir = f"{config['checkpoints_dir']}/offset_{config['offset']}_num_steps_{config['num_steps']}"
 
-
     def sample(self, image_map):
         y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
         inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
@@ -165,6 +164,14 @@ class Runner:
 
         return epoch_loss, epoch_iou, log_window
 
+    def pred(self, inputs):
+        model_path = f"{self.checkpoints_dir}/best_model.pth"
+        self.model.load_state_dict(torch.load(model_path))
+        self.model.eval()
+        outputs = self.model(inputs)
+
+        return outputs
+
     def run(self, log=True):
         np.random.seed(0)
         os.makedirs(self.checkpoints_dir, exist_ok=True)
@@ -190,7 +197,10 @@ class Runner:
                 best_loss = val_loss
                 best_model_wts = copy.deepcopy(self.model.state_dict())
 
-                wandb.log({f"epoch = {epoch}": [wandb.Image(log_window, caption='red=pred, green=true, white=intersection')]}) # for im, c in zip([inputs[0], outputs[0], targets[0]], ['input', 'output', 'target'])]})
+                wandb.log({f"epoch = {epoch}": [wandb.Image(log_window, caption='red=pred, '
+                                                                                'green=true, '
+                                                                                'white=intersection')]})
+                # for im, c in zip([inputs[0], outputs[0], targets[0]], ['input', 'output', 'target'])]})
 
             torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/epoch_{epoch:05d}.pth")
 
@@ -205,7 +215,7 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run(True)
+    runner.run()
 
 
 
