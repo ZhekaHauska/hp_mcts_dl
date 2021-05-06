@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -7,41 +9,7 @@ import numpy as np
 import wandb
 
 from mcts_dl.utils.dataset import City
-
-def iou(true_mask, pred_mask, average):
-    classes = np.unique(true_mask)
-
-    TP = []
-    FP = []
-    FN = []
-    for class_ in classes:
-        pos_pred = pred_mask == class_
-        neg_pred = pred_mask != class_
-        pos_true = true_mask == class_
-        neg_true = true_mask != class_
-
-        tp = sum(pos_true[pos_pred])
-        fp = sum(neg_true[pos_pred])
-        fn = sum(pos_true[neg_pred])
-
-        TP.append(tp)
-        FP.append(fp)
-        FN.append(fn)
-
-    if average == "binary":
-        iou_ = TP[-1] / (TP[-1] + FP[-1] + FN[-1])  # pos_label == 1
-
-def calc_iou(outputs, targets, threshold=0.5):
-    SMOOTH = 1e-6
-    outputs = outputs.squeeze(1) > threshold
-    targets = targets.squeeze(1) > threshold
-
-    intersection = (outputs & targets).float().sum((1, 2))
-    union = (outputs | targets).float().sum((1, 2))
-
-    iou = intersection / (union + SMOOTH)
-
-    return iou.sum()
+from mcts_dl.utils.iou import calc_iou
 
 
 class ModelNetwork(nn.Module):
@@ -82,6 +50,7 @@ class ModelNetwork(nn.Module):
 class Runner:
     def __init__(self, config):
         self.config = config
+
         self.map_size = config['map_size']
         train_ds = City(map_root="../../data/train", map_size=self.map_size)
         val_ds = City(map_root="../../data/val", map_size=self.map_size)
@@ -93,20 +62,23 @@ class Runner:
 
         self.offset = config['offset']
 
-        window_size = 2 * self.offset + 1
-        self.model = ModelNetwork(window_size)
+        self.window_size = 2 * self.offset + 1
+        self.model = ModelNetwork(self.window_size)
 
         self.loss_func = nn.BCELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.batch_size = config['batch_size']
         self.num_epochs = config['num_epochs']
-        self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=self.batch_size, shuffle=True),
-                             'val': DataLoader(data_set['val'], batch_size=self.batch_size, shuffle=False),
-                             'test': DataLoader(data_set['test'], batch_size=self.batch_size, shuffle=False)}
+
+        self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=6, shuffle=True),
+                             'val': DataLoader(data_set['val'], batch_size=2, shuffle=True),
+                             'test': DataLoader(data_set['test'], batch_size=2, shuffle=True)}
 
         self.num_steps = config['num_steps']
+        self.threshold = config['threshold']
+        self.checkpoints_dir = f"{config['checkpoints_dir']}/offset_{config['offset']}_num_steps_{config['num_steps']}"
+
 
     def sample(self, image_map):
         y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
@@ -148,11 +120,11 @@ class Runner:
                 loss.backward()
                 self.optimizer.step()
 
-                iou = calc_iou(targets.cpu().detach(), targets.cpu().detach())
+                iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                 epoch_iou += iou
 
-        epoch_loss = epoch_loss / (len(self.data_loaders['train']) * self.num_steps * self.batch_size)
-        epoch_iou = epoch_iou / (len(self.data_loaders['train']) * self.num_steps * self.batch_size)
+        epoch_loss = epoch_loss / (len(self.data_loaders['train']) * self.num_steps)
+        epoch_iou = epoch_iou / (len(self.data_loaders['train']) * self.num_steps)
 
         return epoch_loss, epoch_iou
 
@@ -175,15 +147,27 @@ class Runner:
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
 
-                iou = calc_iou(targets.cpu().detach(), targets.cpu().detach())
+                iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                 epoch_iou += iou
 
-        epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps * self.batch_size)
-        epoch_iou = epoch_iou / (len(self.data_loaders['val']) * self.num_steps * self.batch_size)
+        epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
+        epoch_iou = epoch_iou / (len(self.data_loaders['val']) * self.num_steps)
 
-        return epoch_loss, epoch_iou, outputs, targets
+        log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
+
+        output = outputs[0].cpu().detach().squeeze() > self.threshold
+        target = targets[0].cpu().detach().squeeze() > self.threshold
+
+        intersection = (output & target)
+        log_window[output] = [255, 0, 0]
+        log_window[target] = [0, 255, 0]
+        log_window[intersection] = [255, 255, 255]
+
+        return epoch_loss, epoch_iou, log_window
 
     def run(self, log=True):
+        np.random.seed(0)
+        os.makedirs(self.checkpoints_dir, exist_ok=True)
         if log:
             wandb.init(project=self.config['project_name'], config=self.config)
 
@@ -194,7 +178,7 @@ class Runner:
 
         for epoch in range(self.num_epochs):
             train_loss, train_iou = self.train()
-            val_loss, val_iou, outputs, targets = self.eval()
+            val_loss, val_iou, log_window = self.eval()
 
             logs = {'train_loss': train_loss,
                     'train_iou': train_iou,
@@ -206,11 +190,12 @@ class Runner:
                 best_loss = val_loss
                 best_model_wts = copy.deepcopy(self.model.state_dict())
 
-                wandb.log({f"epoch = {epoch}": [wandb.Image(im, caption=c) for im, c in zip([outputs[0], targets[0]],
-                                                                                            ['pred', 'true'])]})
+                wandb.log({f"epoch = {epoch}": [wandb.Image(log_window, caption='red=pred, green=true, white=intersection')]}) # for im, c in zip([inputs[0], outputs[0], targets[0]], ['input', 'output', 'target'])]})
+
+            torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/epoch_{epoch:05d}.pth")
 
         self.model.load_state_dict(best_model_wts)
-        # torch.save(self.model.state_dict(), "./checkpoints/best_model.pth")
+        torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/best_model.pth")
 
 
 if __name__ == '__main__':
@@ -220,7 +205,7 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run()
+    runner.run(True)
 
 
 
