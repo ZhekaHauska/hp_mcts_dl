@@ -225,6 +225,7 @@ class Runner:
         epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
         epoch_metric = epoch_metric / (len(self.data_loaders['val']) * self.num_steps)
 
+        log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
         if self.mode == 'border':
             start = 0
             end = self.window_size + 2
@@ -259,17 +260,17 @@ class Runner:
             y = y0 + dy
             x = x0 + dx
 
-            log_window = result[idx, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
+            output = result[idx, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
+            output = output.cpu().detach().squeeze() > self.threshold
+            target = targets[idx].cpu().detach().squeeze() > self.threshold
         else:
-            log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
-
             output = outputs[0].cpu().detach().squeeze() > self.threshold
             target = targets[0].cpu().detach().squeeze() > self.threshold
 
-            intersection = (output & target)
-            log_window[output] = [255, 0, 0]
-            log_window[target] = [0, 255, 0]
-            log_window[intersection] = [255, 255, 255]
+        intersection = (output & target)
+        log_window[output] = [255, 0, 0]
+        log_window[target] = [0, 255, 0]
+        log_window[intersection] = [255, 255, 255]
 
         return epoch_loss, epoch_metric, log_window
 
