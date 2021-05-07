@@ -119,6 +119,7 @@ class GridWorld:
     def reset(self):
         self.step = 0
         self.position = self.start_position
+        self.previous_position = None
         self.done = False
         self.is_success = False
         self.reward = 0

@@ -22,9 +22,9 @@ Example = namedtuple('Example',
                      ('state', 'vector', 'action_probs', 'value'))
 
 
-class AZero(nn.Module):
+class ValuePolicyNetwork(nn.Module):
     def __init__(self, input_channels, h, w, input_vector_size, n_actions):
-        super(AZero, self).__init__()
+        super(ValuePolicyNetwork, self).__init__()
         # window
         self.conv1 = nn.Conv2d(input_channels, 16, padding=0, kernel_size=3, stride=1)
         self.bn1 = nn.BatchNorm2d(16)
@@ -85,7 +85,7 @@ class AZero(nn.Module):
         return value, policy
 
 
-class AZeroAgent:
+class VPAgent:
     def __init__(self, batch_size=None, gamma=None, eps_start=None, eps_end=None, eps_decay=None,
                  window=None, n_actions=None, n_layers=None, capacity=None, learning_rate=None, input_vector_size=None):
         self.batch_size = batch_size
@@ -103,7 +103,7 @@ class AZeroAgent:
         self.capacity = capacity
         self.learning_rate = learning_rate
 
-        self.model = AZero(self.n_input_layers, self.rows, self.cols, self.input_vector_size, self.n_actions)
+        self.model = ValuePolicyNetwork(self.n_input_layers, self.rows, self.cols, self.input_vector_size, self.n_actions)
         self.model.to(self.device)
 
         self.steps_done = 0
@@ -156,7 +156,7 @@ class AZeroAgent:
         return value_loss.item(), policy_loss.item()
 
 
-class AZeroAgentCurriculum:
+class VPAgentCurriculum:
     def __init__(self, config):
         self.config = config
         agent_conf = config['agent']
@@ -168,7 +168,7 @@ class AZeroAgentCurriculum:
         self.evaluate_every_episodes = config['eval_period_episodes']
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.agent = AZeroAgent(**agent_conf)
+        self.agent = VPAgent(**agent_conf)
 
         self.checkpoint_name = config['load_checkpoint']
         self.checkpoint_path = config['checkpoint_path']
@@ -414,7 +414,7 @@ class AZeroAgentCurriculum:
                 print(metrics)
 
 
-class AZeroTrainer:
+class VPTrainer:
     def __init__(self, config):
         self.config = config
         agent_conf = config['agent']
@@ -425,7 +425,7 @@ class AZeroTrainer:
         self.evaluate_every_epoch = config['eval_period_epoch']
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.agent = AZeroAgent(**agent_conf)
+        self.agent = VPAgent(**agent_conf)
 
         self.checkpoint_name = config['load_checkpoint']
         self.checkpoint_path = config['checkpoint_path']
@@ -612,5 +612,5 @@ if __name__ == '__main__':
     with open('../../configs/dqn/azero_curriculum_default.yaml', 'r') as file:
         config = yaml.load(file, yaml.Loader)
 
-    runner = AZeroAgentCurriculum(config)
+    runner = VPAgentCurriculum(config)
     runner.run_curriculum(log_video_every=1000)
