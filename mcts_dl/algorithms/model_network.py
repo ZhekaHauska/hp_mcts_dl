@@ -250,8 +250,8 @@ class Runner:
             result[:, :, 1:-1, 1:-1] = inputs.cpu().detach()
 
             idx = 0
-            dy = actions[idx, 0]
-            dx = actions[idx, 1]
+            dy = int(actions[idx, 0].item())
+            dx = int(actions[idx, 1].item())
 
             y0 = self.offset + 1
             x0 = self.offset + 1
