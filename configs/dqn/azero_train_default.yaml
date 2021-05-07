@@ -1,19 +1,17 @@
 project_name: 'hpp_azero_curriculum'
-max_episodes: -1
-eval_period_episodes: 5000
-full_evaluation_period: 20
-load_checkpoint: 'az_295000_1_0.43_1y4hhusv.pt'
+max_epoch: -1
+eval_period_epoch: 2500
+load_checkpoint: null
 checkpoint_path: './checkpoints'
-start_level: 0
-end_level: 80
+min_level: 0
+max_level: 80
 success_rate_next_level: 0.5
-change_level_every: 50000
-levels_at_once: 5
+sample_every: 10000
+sample_size: 35
 maps: null
-optimize_every_step: 512
 
 agent:
-  batch_size: 512
+  batch_size: 1024
   gamma: 0.95
   eps_start: 0.1
   eps_end: 0.001
@@ -25,7 +23,7 @@ agent:
   learning_rate: 0.00001
 
 environment:
-  window_size: 11
+  window_size: 21
   goal_reward: 0
   distance_reward_weight_forward: 0
   distance_reward_weight_backward: 0

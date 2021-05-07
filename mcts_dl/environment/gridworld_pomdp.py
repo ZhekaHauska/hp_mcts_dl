@@ -11,7 +11,8 @@ class GridWorld:
     def __init__(self, map_name, task, window_size, max_steps_mult=3, move_reward=0, goal_reward=1,
                  distance_reward_weight_forward=1, distance_reward_weight_backward=-1,
                  rest_distance_reward_weight=0, collision_reward=0, path='.',
-                 max_steps=None):
+                 max_steps=None,
+                 disable_repetitions=False):
         self.collision_reward = collision_reward
         self.move_reward = move_reward
         self.map_name = map_name
@@ -22,10 +23,9 @@ class GridWorld:
         self.map = ReadMapFromMovingAIFile(os.path.join(self.path, self.map_name + '.map'))
 
         self.window_size = window_size
-        self.done = False
-        self.is_success = False
         self.task_length = length
         self.position = np.array([i_start, j_start])
+        self.previous_position = None
         self.start_position = np.array([i_start, j_start])
         self.goal_position = np.array([i_goal, j_goal])
         self.actions = np.array([[1, 1], [1, -1], [-1, -1], [-1, 1],
@@ -52,28 +52,42 @@ class GridWorld:
         self.reward_map /= self.reward_map.max()
         self.reward_map = 1 - self.reward_map
 
+        self.done = False
+        self.is_success = False
+        if np.all(self.position == self.goal_position):
+            self.done = True
+            self.is_success = True
+        self.path_length = 0
+        self.disable_repetitions = disable_repetitions
+
     def act(self, action):
         new_position = self.position + self.actions[action]
         self.reward = 0
         if tuple(new_position) in self.map.GetNeighbors(*self.position):
-            if np.all(new_position == self.goal_position):
+            if np.all(new_position == self.previous_position):
                 self.done = True
-                self.is_success = True
-                self.reward = self.goal_reward
+                self.reward = self.collision_reward
             else:
-                distance_reward = (self.reward_map[self.position[0], self.position[1]] -
-                                   self.reward_map[new_position[0], new_position[1]]
-                                   )
-                if distance_reward <= 0:
-                    distance_reward *= self.distance_reward_weight_backward
+                if np.all(new_position == self.goal_position):
+                    self.done = True
+                    self.is_success = True
+                    self.reward = self.goal_reward
                 else:
-                    distance_reward *= self.distance_reward_weight_forward
+                    distance_reward = (self.reward_map[self.position[0], self.position[1]] -
+                                       self.reward_map[new_position[0], new_position[1]]
+                                       )
+                    if distance_reward <= 0:
+                        distance_reward *= self.distance_reward_weight_backward
+                    else:
+                        distance_reward *= self.distance_reward_weight_forward
 
-                self.reward = distance_reward + self.move_reward
+                    self.reward = distance_reward + self.move_reward
 
-            self.position = new_position
-            self.vec = self.goal_position - self.position
-            self.signal = np.linalg.norm(self.vec) / self.max_length
+                self.previous_position = self.position
+                self.position = new_position
+                self.vec = self.goal_position - self.position
+                self.signal = np.linalg.norm(self.vec) / self.max_length
+                self.path_length += np.linalg.norm(self.actions[action])
         else:
             self.done = True
             self.reward = self.collision_reward
@@ -112,6 +126,7 @@ class GridWorld:
         self.vec = self.goal_position - self.start_position
         self.action_probs = np.ones(self.actions.shape[0])/self.actions.shape[0]
         self.signal = np.linalg.norm(self.vec)/self.max_length
+        self.path_length = 0
 
     def observe(self):
         window = self.get_window(np.array(self.map.cells), self.position, self.window_size)
@@ -151,8 +166,8 @@ class GridWorld:
         col = self.position[1]
         world[row, col] = 2
         world[self.goal_position[0], self.goal_position[1]] = 3
-        window = self.get_window(world, self.position, int(self.task_length * 2))[0]
-        rmap = self.get_window(self.reward_map, self.position, int(self.task_length * 2))[0]
+        window = self.get_window(world, self.position, self.window_size)[0]
+        rmap = self.get_window(self.reward_map, self.position, self.window_size)[0]
         return window, rmap
 
     def in_bounds(self, position):
