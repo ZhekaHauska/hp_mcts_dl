@@ -193,6 +193,7 @@ class Runner:
                 if self.mode == 'border':
                     acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['acc'] += acc
+                    epoch_metrics['acc'] += acc
                     f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['f1'] += f1
                 else:
@@ -327,13 +328,13 @@ class Runner:
         self.model = self.model.to(self.device)
 
         for epoch in range(self.num_epochs):
-            train_loss, train_iou = self.train()
-            val_loss, val_iou, log_window = self.eval()
+            train_loss, train_metrics = self.train()
+            val_loss, val_metrics, log_window = self.eval()
 
             logs = {'train_loss': train_loss,
-                    'train_acc': train_iou,
+                    'train': train_metrics,
                     'val_loss': val_loss,
-                    'val_acc': val_iou}
+                    'val_acc': val_metrics}
             wandb.log(logs)
 
             if val_loss < best_loss:
@@ -357,4 +358,4 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run(False)
+    runner.run(True)
