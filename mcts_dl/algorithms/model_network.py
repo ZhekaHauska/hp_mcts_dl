@@ -399,4 +399,4 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run(True)
+    runner.run(False)
