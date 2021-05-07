@@ -57,13 +57,8 @@ class ModelNetworkBorder(nn.Module):
             nn.ReLU()
         )
 
-        self.action = nn.Sequential(
-            nn.Linear(2, 16),
-            nn.ReLU()
-        )
-
         self.output = nn.Sequential(
-            nn.Linear(1156 + 16, 256),
+            nn.Linear(1156, 256),
             nn.ReLU(),
             nn.Linear(256, 4 * window_size + 4),
             nn.Sigmoid()
@@ -71,12 +66,8 @@ class ModelNetworkBorder(nn.Module):
 
     def forward(self, inputs, actions):
         inputs = self.input(inputs)
-        actions = self.action(actions)
-
         inputs = inputs.view(inputs.shape[0], -1)
-
-        outputs = torch.cat((inputs, actions), dim=-1)
-        outputs = self.output(outputs)
+        outputs = self.output(inputs)
 
         return outputs
 
