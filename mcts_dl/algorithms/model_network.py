@@ -194,6 +194,7 @@ class Runner:
                     acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['acc'] += acc
                     epoch_metrics['acc'] += acc
+
                     f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['f1'] += f1
                 else:
@@ -206,7 +207,48 @@ class Runner:
 
         return epoch_loss, epoch_metrics
 
-    def make_window(self, inputs, outputs, actions, target_windows):
+    def make_window(self, inputs, outputs, actions):
+        start = 0
+        end = self.window_size + 2
+        up = outputs[:, start:end]
+
+        start = end
+        end = start + self.window_size
+        right = outputs[:, start:end]
+
+        start = end
+        end = start + self.window_size + 2
+        down = outputs[:, start:end]
+
+        start = end
+        end = start + self.window_size
+        left = outputs[:, start:end]
+
+        result = torch.zeros((inputs.shape[0], 1, self.window_size + 2, self.window_size + 2))
+        result[:, :, 0, :] = up.unsqueeze(1)
+        result[:, :, 1:-1, -1] = right.unsqueeze(1)
+        result[:, :, -1, :] = down.unsqueeze(1)
+        result[:, :, 1:-1, 0] = left.unsqueeze(1)
+        result[:, :, 1:-1, 1:-1] = inputs.cpu().detach()
+
+        outputs = torch.zeros_like(inputs)
+        for idx, action in enumerate(actions):
+            dy = int(actions[idx, 0].item())
+            dx = int(actions[idx, 1].item())
+
+            y0 = self.offset + 1
+            x0 = self.offset + 1
+
+            y = y0 + dy
+            x = x0 + dx
+
+            outputs[idx] = result[idx, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
+
+        outputs = outputs.cpu().detach().squeeze() > self.threshold
+
+        return outputs
+
+    def make_log_window(self, inputs, outputs, actions, target_windows):
         log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
         idx = 0
         if self.mode == 'border':
@@ -304,7 +346,7 @@ class Runner:
         for m in epoch_metrics:
             epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders['val']) * self.num_steps)
 
-        log_window = self.make_window(inputs, outputs, actions, target_windows)
+        log_window = self.make_log_window(inputs, outputs, actions, target_windows)
 
         return epoch_loss, epoch_metrics, log_window
 
