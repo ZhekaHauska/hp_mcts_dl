@@ -1,3 +1,9 @@
+def calc_acc(outputs, targets, threshold):
+    outputs = outputs.squeeze(1) > threshold
+    targets = targets.squeeze(1) > threshold
+    acc = (outputs == targets).float().sum(1) / targets.shape[1]
+    return acc.mean()
+
 
 def calc_iou(outputs, targets, threshold=0.5):
     SMOOTH = 1e-6

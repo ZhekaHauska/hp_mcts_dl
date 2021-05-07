@@ -9,7 +9,8 @@ import numpy as np
 import wandb
 
 from mcts_dl.utils.dataset import City
-from mcts_dl.utils.iou import calc_iou
+from mcts_dl.utils.metrics import calc_iou
+from mcts_dl.utils.metrics import calc_acc
 
 
 class ModelNetworkWindow(nn.Module):
@@ -75,7 +76,7 @@ class ModelNetworkBorder(nn.Module):
 class Runner:
     def __init__(self, config):
         self.config = config
-
+        self.mode == config['mode']
         self.map_size = config['map_size']
         train_ds = City(map_root="../../data/train", map_size=self.map_size)
         val_ds = City(map_root="../../data/val", map_size=self.map_size)
@@ -88,7 +89,10 @@ class Runner:
         self.offset = config['offset']
 
         self.window_size = 2 * self.offset + 1
-        self.model = ModelNetworkBorder(self.window_size)
+
+        models = {'window': ModelNetworkWindow,
+                  'border': ModelNetworkBorder}
+        self.model = models[self.mode](self.window_size)
 
         self.loss_func = nn.BCELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
@@ -115,8 +119,7 @@ class Runner:
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
             y = y0 + dy
             x = x0 + dx
-            targets[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1),
-                         (x - self.offset):(x + self.offset + 1)]
+            targets[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
             actions[i][0] = dy
             actions[i][1] = dx
 
@@ -150,15 +153,19 @@ class Runner:
         self.model.train()
 
         epoch_loss = 0.0
-        epoch_iou = 0.0
+        epoch_metric = 0.0
         for batch in self.data_loaders['train']:
             image_map = batch['image']
             for step in range(self.num_steps):
-                inputs, targets, actions = self.sample_border(image_map)
+                if self.mode == 'border':
+                    inputs, targets, actions = self.sample_border(image_map)
+
+                else:
+                    inputs, targets, actions = self.sample_window(image_map)
+                    actions = actions.to(self.device)
 
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
-                actions = actions.to(self.device)
 
                 outputs = self.model(inputs, actions)
 
@@ -169,56 +176,70 @@ class Runner:
                 loss.backward()
                 self.optimizer.step()
 
-                #iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                #epoch_iou += iou
+                if self.mode == 'border':
+                    acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metric += acc
+                else:
+                    iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metric += iou
 
         epoch_loss = epoch_loss / (len(self.data_loaders['train']) * self.num_steps)
-        epoch_iou = epoch_iou / (len(self.data_loaders['train']) * self.num_steps)
+        epoch_metric = epoch_metric / (len(self.data_loaders['train']) * self.num_steps)
 
-        return epoch_loss, epoch_iou
+        return epoch_loss, epoch_metric
 
     def eval(self):
         self.model.eval()
 
         epoch_loss = 0.0
-        epoch_iou = 0.0
+        epoch_metric = 0.0
         for batch in self.data_loaders['val']:
             image_map = batch['image']
             for step in range(self.num_steps):
-                inputs, targets, actions = self.sample_border(image_map)
+                if self.mode == 'border':
+                    inputs, targets, actions = self.sample_border(image_map)
+                else:
+                    inputs, targets, actions = self.sample_window(image_map)
+                    actions = actions.to(self.device)
 
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
-                actions = actions.to(self.device)
 
                 outputs = self.model(inputs, actions)
 
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
 
-                #iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                #epoch_iou += iou
+                if self.mode == 'border':
+                    acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metric += acc
+                else:
+                    iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metric += iou
 
         epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
-        #epoch_iou = epoch_iou / (len(self.data_loaders['val']) * self.num_steps)
+        epoch_metric = epoch_metric / (len(self.data_loaders['val']) * self.num_steps)
 
-        log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
+        if self.mode == 'border':
+            log_window = None
+        else:
+            log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
 
-        #output = outputs[0].cpu().detach().squeeze() > self.threshold
-        #target = targets[0].cpu().detach().squeeze() > self.threshold
+            output = outputs[0].cpu().detach().squeeze() > self.threshold
+            target = targets[0].cpu().detach().squeeze() > self.threshold
 
-        #intersection = (output & target)
-        #log_window[output] = [255, 0, 0]
-        #log_window[target] = [0, 255, 0]
-        #log_window[intersection] = [255, 255, 255]
+            intersection = (output & target)
+            log_window[output] = [255, 0, 0]
+            log_window[target] = [0, 255, 0]
+            log_window[intersection] = [255, 255, 255]
 
-        return epoch_loss, epoch_iou, log_window
+        return epoch_loss, epoch_metric, log_window
 
-    def pred(self, inputs):
+    def pred(self, inputs, actions):
         model_path = f"{self.checkpoints_dir}/best_model.pth"
         self.model.load_state_dict(torch.load(model_path))
         self.model.eval()
-        outputs = self.model(inputs)
+        outputs = self.model(inputs, actions)
 
         return outputs
 

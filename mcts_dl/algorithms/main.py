@@ -1,5 +1,5 @@
 import torch
-from model_network import ModelNetwork
+from model_network import ModelNetworkWindow
 
 
 def predict(inputs, actions):
