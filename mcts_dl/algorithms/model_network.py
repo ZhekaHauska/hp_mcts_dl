@@ -77,8 +77,8 @@ class Runner:
         self.config = config
         self.mode = config['mode']
         self.map_size = config['map_size']
-        train_ds = City(map_root="../../data/train", map_size=self.map_size)
-        val_ds = City(map_root="../../data/val", map_size=self.map_size)
+        train_ds = City(map_root="../../data/new_train", map_size=self.map_size)
+        val_ds = City(map_root="../../data/new_val", map_size=self.map_size)
         test_ds = City(map_root="../../data/test", map_size=self.map_size)
 
         data_set = {'train': train_ds,
@@ -99,7 +99,7 @@ class Runner:
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.num_epochs = config['num_epochs']
 
-        self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=6, shuffle=True),
+        self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=2, shuffle=True),
                              'val': DataLoader(data_set['val'], batch_size=2, shuffle=True),
                              'test': DataLoader(data_set['test'], batch_size=2, shuffle=True)}
 
@@ -157,13 +157,14 @@ class Runner:
     def train(self):
         self.model.train()
         phase = 'train'
-        epoch_loss = 0.0
+
+        epoch_metrics = dict()
+        epoch_metrics['loss'] = 0.0
+
         if self.mode == 'border':
-            epoch_metrics = dict()
             epoch_metrics['acc'] = 0.0
             epoch_metrics['f1'] = 0.0
         else:
-            epoch_metrics = dict()
             epoch_metrics['iou'] = 0.0
 
         for batch in self.data_loaders[phase]:
@@ -184,7 +185,7 @@ class Runner:
                     outputs = self.model(inputs, actions)
 
                 loss = self.loss_func(outputs, targets)
-                epoch_loss += loss.cpu().detach()
+                epoch_metrics['loss'] += loss.cpu().detach()
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -200,11 +201,10 @@ class Runner:
                     iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['iou'] += iou
 
-            epoch_loss = epoch_loss / (len(self.data_loaders[phase]) * self.num_steps)
             for m in epoch_metrics:
                 epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
 
-        return epoch_loss, epoch_metrics
+        return epoch_metrics
 
     def make_window(self, inputs, outputs, actions):
         start = 0
@@ -297,65 +297,73 @@ class Runner:
 
         return log_window
 
-    def eval(self):
+    def eval(self, phase='val'):
         self.model.eval()
-        phase = 'val'
-        epoch_loss = 0.0
+        epoch_metrics = dict()
+        epoch_metrics['loss'] = 0.0
+
         if self.mode == 'border':
-            epoch_metrics = dict()
             epoch_metrics['acc'] = 0.0
             epoch_metrics['f1'] = 0.0
         else:
-            epoch_metrics = dict()
             epoch_metrics['iou'] = 0.0
 
-        for batch in self.data_loaders[phase]:
-            image_map = batch['image']
-            for step in range(self.num_steps):
-                if self.mode == 'border':
-                    inputs, targets, actions, target_windows = self.sample_border(image_map)
-                    inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
+        with torch.no_grad():
+            for batch in self.data_loaders[phase]:
+                image_map = batch['image']
+                for step in range(self.num_steps):
+                    if self.mode == 'border':
+                        inputs, targets, actions, target_windows = self.sample_border(image_map)
+                        inputs = inputs.to(self.device)
+                        targets = targets.to(self.device)
 
-                    outputs = self.model(inputs)
-                else:
-                    inputs, targets, actions = self.sample_window(image_map)
-                    target_windows = targets
+                        outputs = self.model(inputs)
+                    else:
+                        inputs, targets, actions = self.sample_window(image_map)
+                        target_windows = targets
 
-                    inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
+                        inputs = inputs.to(self.device)
+                        targets = targets.to(self.device)
 
-                    actions = actions.to(self.device)
+                        actions = actions.to(self.device)
 
-                    outputs = self.model(inputs, actions)
+                        outputs = self.model(inputs, actions)
 
-                loss = self.loss_func(outputs, targets)
-                epoch_loss += loss.cpu().detach()
+                    loss = self.loss_func(outputs, targets)
+                    epoch_metrics['loss'] += loss.cpu().detach()
 
-                if self.mode == 'border':
-                    acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                    epoch_metrics['acc'] += acc
-                    f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                    epoch_metrics['f1'] += f1
-                else:
-                    iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                    epoch_metrics['iou'] += iou
+                    if self.mode == 'border':
+                        acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                        epoch_metrics['acc'] += acc
+                        f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                        epoch_metrics['f1'] += f1
+                    else:
+                        iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                        epoch_metrics['iou'] += iou
 
-        epoch_loss = epoch_loss / (len(self.data_loaders[phase]) * self.num_steps)
         for m in epoch_metrics:
             epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
 
         log_window = self.make_log_window(inputs, outputs, actions, target_windows)
 
-        return epoch_loss, epoch_metrics, log_window
+        return epoch_metrics, log_window
 
-    def pred(self, inputs, actions):
-        model_path = f"{self.checkpoints_dir}/best_model.pth"
-        self.model.load_state_dict(torch.load(model_path))
+    def pred(self, inputs, actions, model_path=None):
+        if not model_path:
+            self.model.load_state_dict(torch.load(model_path))
+
         self.model.eval()
         outputs = self.model(inputs, actions)
 
         return outputs
+
+    def test(self, model_path=None):
+        if not model_path:
+            self.model.load_state_dict(torch.load(model_path))
+        self.model.eval()
+        test_metrics, log_window = self.eval(phase='test')
+        wandb.log({'test': test_metrics})
+        wandb.log({f"test": [wandb.Image(log_window)]})
 
     def run(self, log=True):
         np.random.seed(0)
@@ -369,15 +377,14 @@ class Runner:
         self.model = self.model.to(self.device)
 
         for epoch in range(self.num_epochs):
-            train_loss, train_metrics = self.train()
-            val_loss, val_metrics, log_window = self.eval()
+            train_metrics = self.train()
+            val_metrics, log_window = self.eval()
 
-            logs = {'train_loss': train_loss,
-                    'train': train_metrics,
-                    'val_loss': val_loss,
+            logs = {'train': train_metrics,
                     'val': val_metrics}
             wandb.log(logs)
 
+            val_loss = val_metrics['loss']
             if val_loss < best_loss:
                 best_loss = val_loss
                 best_model_wts = copy.deepcopy(self.model.state_dict())
@@ -399,4 +406,4 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run(False)
+    runner.run(True)
