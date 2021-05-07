@@ -65,7 +65,7 @@ class ModelNetworkBorder(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, inputs, actions):
+    def forward(self, inputs):
         inputs = self.input(inputs)
         inputs = inputs.view(inputs.shape[0], -1)
         outputs = self.output(inputs)
@@ -76,7 +76,7 @@ class ModelNetworkBorder(nn.Module):
 class Runner:
     def __init__(self, config):
         self.config = config
-        self.mode == config['mode']
+        self.mode = config['mode']
         self.map_size = config['map_size']
         train_ds = City(map_root="../../data/train", map_size=self.map_size)
         val_ds = City(map_root="../../data/val", map_size=self.map_size)
@@ -159,15 +159,17 @@ class Runner:
             for step in range(self.num_steps):
                 if self.mode == 'border':
                     inputs, targets, actions = self.sample_border(image_map)
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
 
+                    outputs = self.model(inputs)
                 else:
                     inputs, targets, actions = self.sample_window(image_map)
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
                     actions = actions.to(self.device)
 
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
-
-                outputs = self.model(inputs, actions)
+                    outputs = self.model(inputs, actions)
 
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
@@ -198,14 +200,17 @@ class Runner:
             for step in range(self.num_steps):
                 if self.mode == 'border':
                     inputs, targets, actions = self.sample_border(image_map)
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
+
+                    outputs = self.model(inputs)
                 else:
                     inputs, targets, actions = self.sample_window(image_map)
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
                     actions = actions.to(self.device)
 
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
-
-                outputs = self.model(inputs, actions)
+                    outputs = self.model(inputs, actions)
 
                 loss = self.loss_func(outputs, targets)
                 epoch_loss += loss.cpu().detach()
@@ -221,7 +226,40 @@ class Runner:
         epoch_metric = epoch_metric / (len(self.data_loaders['val']) * self.num_steps)
 
         if self.mode == 'border':
-            log_window = None
+            start = 0
+            end = self.window_size + 2
+            up = outputs[:, start:end]
+
+            start = end
+            end = start + self.window_size
+            right = outputs[:, start:end]
+
+            start = end
+            end = start + self.window_size + 2
+            down = outputs[:, start:end]
+
+            start = end
+            end = start + self.window_size
+            left = outputs[:, start:end]
+
+            result = torch.zeros((inputs.shape[0], 1, self.window_size+2, self.window_size+2))
+            result[:, :, 0, :] = up.unsqueeze(1)
+            result[:, :, 1:-1, -1] = right.unsqueeze(1)
+            result[:, :, -1, :] = down.unsqueeze(1)
+            result[:, :, 1:-1, 0] = left.unsqueeze(1)
+            result[:, :, 1:-1, 1:-1] = inputs.cpu().detach()
+
+            idx = 0
+            dy = actions[idx, 0]
+            dx = actions[idx, 1]
+
+            y0 = self.offset + 1
+            x0 = self.offset + 1
+
+            y = y0 + dy
+            x = x0 + dx
+
+            log_window = result[idx, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
         else:
             log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
 
@@ -268,9 +306,8 @@ class Runner:
                 best_loss = val_loss
                 best_model_wts = copy.deepcopy(self.model.state_dict())
 
-                wandb.log({f"epoch = {epoch}": [wandb.Image(log_window, caption='red=pred, '
-                                                                                'green=true, '
-                                                                                'white=intersection')]})
+                wandb.log({f"epoch = {epoch}": [wandb.Image(log_window)]})
+
                 # for im, c in zip([inputs[0], outputs[0], targets[0]], ['input', 'output', 'target'])]})
 
             torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/epoch_{epoch:05d}.pth")
