@@ -156,7 +156,7 @@ class Runner:
 
     def train(self):
         self.model.train()
-
+        phase = 'train'
         epoch_loss = 0.0
         if self.mode == 'border':
             epoch_metrics = dict()
@@ -166,7 +166,7 @@ class Runner:
             epoch_metrics = dict()
             epoch_metrics['iou'] = 0.0
 
-        for batch in self.data_loaders['train']:
+        for batch in self.data_loaders[phase]:
             image_map = batch['image']
             for step in range(self.num_steps):
                 if self.mode == 'border':
@@ -193,7 +193,6 @@ class Runner:
                 if self.mode == 'border':
                     acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['acc'] += acc
-                    epoch_metrics['acc'] += acc
 
                     f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['f1'] += f1
@@ -201,9 +200,9 @@ class Runner:
                     iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['iou'] += iou
 
-            epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
+            epoch_loss = epoch_loss / (len(self.data_loaders[phase]) * self.num_steps)
             for m in epoch_metrics:
-                epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders['val']) * self.num_steps)
+                epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
 
         return epoch_loss, epoch_metrics
 
@@ -300,7 +299,7 @@ class Runner:
 
     def eval(self):
         self.model.eval()
-
+        phase = 'val'
         epoch_loss = 0.0
         if self.mode == 'border':
             epoch_metrics = dict()
@@ -310,7 +309,7 @@ class Runner:
             epoch_metrics = dict()
             epoch_metrics['iou'] = 0.0
 
-        for batch in self.data_loaders['val']:
+        for batch in self.data_loaders[phase]:
             image_map = batch['image']
             for step in range(self.num_steps):
                 if self.mode == 'border':
@@ -342,9 +341,9 @@ class Runner:
                     iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['iou'] += iou
 
-        epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
+        epoch_loss = epoch_loss / (len(self.data_loaders[phase]) * self.num_steps)
         for m in epoch_metrics:
-            epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders['val']) * self.num_steps)
+            epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
 
         log_window = self.make_log_window(inputs, outputs, actions, target_windows)
 
@@ -376,7 +375,7 @@ class Runner:
             logs = {'train_loss': train_loss,
                     'train': train_metrics,
                     'val_loss': val_loss,
-                    'val_acc': val_metrics}
+                    'val': val_metrics}
             wandb.log(logs)
 
             if val_loss < best_loss:
