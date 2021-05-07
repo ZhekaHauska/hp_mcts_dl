@@ -131,7 +131,7 @@ class Runner:
 
         targets = torch.zeros((inputs.shape[0], 4 * self.window_size + 4))
         actions = torch.zeros((inputs.shape[0], 2))
-
+        target_windows = torch.zeros_like(inputs)
         for i in range(inputs.shape[0]):
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
             y = y0
@@ -144,6 +144,12 @@ class Runner:
             left = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x - self.offset - 1)]
 
             targets[i] = torch.cat((up, right, down, left), dim=-1)
+
+            y = y0 + dy
+            x = x0 + dx
+            target_windows[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1),
+                                (x - self.offset):(x + self.offset + 1)]
+
             actions[i][0] = dy
             actions[i][1] = dx
 
@@ -158,7 +164,7 @@ class Runner:
             image_map = batch['image']
             for step in range(self.num_steps):
                 if self.mode == 'border':
-                    inputs, targets, actions = self.sample_border(image_map)
+                    inputs, targets, actions, _ = self.sample_border(image_map)
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
 
@@ -199,15 +205,18 @@ class Runner:
             image_map = batch['image']
             for step in range(self.num_steps):
                 if self.mode == 'border':
-                    inputs, targets, actions = self.sample_border(image_map)
+                    inputs, targets, actions, target_windows = self.sample_border(image_map)
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
 
                     outputs = self.model(inputs)
                 else:
                     inputs, targets, actions = self.sample_window(image_map)
+                    target_windows = targets
+
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
+
                     actions = actions.to(self.device)
 
                     outputs = self.model(inputs, actions)
@@ -226,6 +235,7 @@ class Runner:
         epoch_metric = epoch_metric / (len(self.data_loaders['val']) * self.num_steps)
 
         log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
+        idx = 0
         if self.mode == 'border':
             start = 0
             end = self.window_size + 2
@@ -250,7 +260,6 @@ class Runner:
             result[:, :, 1:-1, 0] = left.unsqueeze(1)
             result[:, :, 1:-1, 1:-1] = inputs.cpu().detach()
 
-            idx = 0
             dy = int(actions[idx, 0].item())
             dx = int(actions[idx, 1].item())
 
@@ -262,10 +271,10 @@ class Runner:
 
             output = result[idx, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
             output = output.cpu().detach().squeeze() > self.threshold
-            target = targets[idx].cpu().detach().squeeze() > self.threshold
+            target = target_windows[idx].cpu().detach().squeeze() > self.threshold
         else:
-            output = outputs[0].cpu().detach().squeeze() > self.threshold
-            target = targets[0].cpu().detach().squeeze() > self.threshold
+            output = outputs[idx].cpu().detach().squeeze() > self.threshold
+            target = target_windows[idx].cpu().detach().squeeze() > self.threshold
 
         intersection = (output & target)
         log_window[output] = [255, 0, 0]
