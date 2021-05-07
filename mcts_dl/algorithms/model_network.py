@@ -9,8 +9,7 @@ import numpy as np
 import wandb
 
 from mcts_dl.utils.dataset import City
-from mcts_dl.utils.metrics import calc_iou
-from mcts_dl.utils.metrics import calc_acc
+from mcts_dl.utils.metrics import calc_iou, calc_acc, calc_f1
 
 
 class ModelNetworkWindow(nn.Module):
@@ -153,13 +152,20 @@ class Runner:
             actions[i][0] = dy
             actions[i][1] = dx
 
-        return inputs, targets, actions
+        return inputs, targets, actions, target_windows
 
     def train(self):
         self.model.train()
 
         epoch_loss = 0.0
-        epoch_metric = 0.0
+        if self.mode == 'border':
+            epoch_metrics = dict()
+            epoch_metrics['acc'] = 0.0
+            epoch_metrics['f1'] = 0.0
+        else:
+            epoch_metrics = dict()
+            epoch_metrics['iou'] = 0.0
+
         for batch in self.data_loaders['train']:
             image_map = batch['image']
             for step in range(self.num_steps):
@@ -186,54 +192,20 @@ class Runner:
 
                 if self.mode == 'border':
                     acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                    epoch_metric += acc
+                    epoch_metrics['acc'] += acc
+                    f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metrics['f1'] += f1
                 else:
                     iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                    epoch_metric += iou
+                    epoch_metrics['iou'] += iou
 
-        epoch_loss = epoch_loss / (len(self.data_loaders['train']) * self.num_steps)
-        epoch_metric = epoch_metric / (len(self.data_loaders['train']) * self.num_steps)
+            epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
+            for m in epoch_metrics:
+                epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders['val']) * self.num_steps)
 
-        return epoch_loss, epoch_metric
+        return epoch_loss, epoch_metrics
 
-    def eval(self):
-        self.model.eval()
-
-        epoch_loss = 0.0
-        epoch_metric = 0.0
-        for batch in self.data_loaders['val']:
-            image_map = batch['image']
-            for step in range(self.num_steps):
-                if self.mode == 'border':
-                    inputs, targets, actions, target_windows = self.sample_border(image_map)
-                    inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
-
-                    outputs = self.model(inputs)
-                else:
-                    inputs, targets, actions = self.sample_window(image_map)
-                    target_windows = targets
-
-                    inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
-
-                    actions = actions.to(self.device)
-
-                    outputs = self.model(inputs, actions)
-
-                loss = self.loss_func(outputs, targets)
-                epoch_loss += loss.cpu().detach()
-
-                if self.mode == 'border':
-                    acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                    epoch_metric += acc
-                else:
-                    iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
-                    epoch_metric += iou
-
-        epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
-        epoch_metric = epoch_metric / (len(self.data_loaders['val']) * self.num_steps)
-
+    def make_window(self, inputs, outputs, actions, target_windows):
         log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
         idx = 0
         if self.mode == 'border':
@@ -253,7 +225,7 @@ class Runner:
             end = start + self.window_size
             left = outputs[:, start:end]
 
-            result = torch.zeros((inputs.shape[0], 1, self.window_size+2, self.window_size+2))
+            result = torch.zeros((inputs.shape[0], 1, self.window_size + 2, self.window_size + 2))
             result[:, :, 0, :] = up.unsqueeze(1)
             result[:, :, 1:-1, -1] = right.unsqueeze(1)
             result[:, :, -1, :] = down.unsqueeze(1)
@@ -281,7 +253,59 @@ class Runner:
         log_window[target] = [0, 255, 0]
         log_window[intersection] = [255, 255, 255]
 
-        return epoch_loss, epoch_metric, log_window
+        return log_window
+
+    def eval(self):
+        self.model.eval()
+
+        epoch_loss = 0.0
+        if self.mode == 'border':
+            epoch_metrics = dict()
+            epoch_metrics['acc'] = 0.0
+            epoch_metrics['f1'] = 0.0
+        else:
+            epoch_metrics = dict()
+            epoch_metrics['iou'] = 0.0
+
+        for batch in self.data_loaders['val']:
+            image_map = batch['image']
+            for step in range(self.num_steps):
+                if self.mode == 'border':
+                    inputs, targets, actions, target_windows = self.sample_border(image_map)
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
+
+                    outputs = self.model(inputs)
+                else:
+                    inputs, targets, actions = self.sample_window(image_map)
+                    target_windows = targets
+
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
+
+                    actions = actions.to(self.device)
+
+                    outputs = self.model(inputs, actions)
+
+                loss = self.loss_func(outputs, targets)
+                epoch_loss += loss.cpu().detach()
+
+                if self.mode == 'border':
+                    acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metrics['acc'] += acc
+                    f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metrics['f1'] += f1
+                else:
+                    iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
+                    epoch_metrics['iou'] += iou
+
+        epoch_loss = epoch_loss / (len(self.data_loaders['val']) * self.num_steps)
+        for m in epoch_metrics:
+            epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders['val']) * self.num_steps)
+
+        log_window = self.make_window(inputs, outputs, actions, target_windows)
+
+        return epoch_loss, epoch_metrics, log_window
 
     def pred(self, inputs, actions):
         model_path = f"{self.checkpoints_dir}/best_model.pth"
@@ -307,9 +331,9 @@ class Runner:
             val_loss, val_iou, log_window = self.eval()
 
             logs = {'train_loss': train_loss,
-                    'train_iou': train_iou,
+                    'train_acc': train_iou,
                     'val_loss': val_loss,
-                    'val_iou': val_iou}
+                    'val_acc': val_iou}
             wandb.log(logs)
 
             if val_loss < best_loss:

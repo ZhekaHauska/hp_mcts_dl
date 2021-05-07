@@ -5,6 +5,10 @@ def calc_acc(outputs, targets, threshold):
     return acc.mean()
 
 
+def calc_f1(outputs, targets, threshold):
+    pass
+
+
 def calc_iou(outputs, targets, threshold=0.5):
     SMOOTH = 1e-6
     outputs = outputs.squeeze(1) > threshold
