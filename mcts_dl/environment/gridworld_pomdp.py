@@ -32,10 +32,10 @@ class GridWorld:
                                  [0, 1], [0, -1], [1, 0], [-1, 0]])
         self.vec = self.goal_position - self.start_position
         self.max_length = self.map.width * (2 ** 0.5)
-        self.signal = np.linalg.norm(self.vec)/self.max_length
+        self.signal = np.linalg.norm(self.vec) / self.max_length
         self.reward = 0
         self.value = 0
-        self.action_probs = np.ones(self.actions.shape[0])/self.actions.shape[0]
+        self.action_probs = np.ones(self.actions.shape[0]) / self.actions.shape[0]
         self.goal_reward = goal_reward
         self.distance_reward_weight_forward = distance_reward_weight_forward
         self.distance_reward_weight_backward = distance_reward_weight_backward
@@ -125,8 +125,8 @@ class GridWorld:
         self.reward = 0
         self.value = 0
         self.vec = self.goal_position - self.start_position
-        self.action_probs = np.ones(self.actions.shape[0])/self.actions.shape[0]
-        self.signal = np.linalg.norm(self.vec)/self.max_length
+        self.action_probs = np.ones(self.actions.shape[0]) / self.actions.shape[0]
+        self.signal = np.linalg.norm(self.vec) / self.max_length
         self.path_length = 0
 
     def observe(self):
@@ -184,16 +184,16 @@ def calculate_next_vector(vector, displacement, max_length):
     """
     Calculates new observation vector for GridWorld.
     :param vector: (direction, distance), where direction -- alpha/pi, distance -- |v|/max_length
-    :param displacement: (displacement_rows, displacement_cols)
+    :param displacement: (delta_row, delta_col) -- agent displacement
     :param max_length: sqrt(2)*map_width
     :return: new observation vector (direction, distance)
     """
     # recover vector to goal
-    alpha = vector[0]*pi
+    alpha = vector[0] * pi
     d = tan(alpha)
-    col = max_length * vector[1]/sqrt(d**2 + 1)
+    col = max_length * vector[1] / sqrt(d ** 2 + 1)
     row = d * col
-    if abs(alpha) > pi/2:
+    if abs(alpha) > pi / 2:
         col = -col
 
     new_row = row + displacement[0]
@@ -206,12 +206,26 @@ def calculate_next_vector(vector, displacement, max_length):
     elif (new_col < 0) and (new_row <= 0):
         new_vec[0] -= pi
     new_vec[0] /= pi
-    new_vec[1] = sqrt(new_col**2 + new_row**2) / max_length
+    new_vec[1] = sqrt(new_col ** 2 + new_row ** 2) / max_length
     return new_vec
 
 
 def is_move_possible(obs_window, displacement):
-    pass
+    """
+    Check move possibility using observation window
+    :param obs_window: 2D image
+    :param displacement: (delta_row, delta_col) -- agent displacement
+    :return: True if move is possible, False -- otherwise
+    """
+    pos_row = obs_window.shape[0] // 2 + 1
+    pos_col = obs_window.shape[1] // 2 + 1
+
+    new_pos_row = pos_row + displacement[0]
+    new_pos_col = pos_col + displacement[1]
+
+    is_traversable = obs_window[new_pos_row, new_pos_col] == 0
+    is_shortcut = obs_window[new_pos_row, pos_col] or obs_window[pos_row, new_pos_col]
+    return is_traversable and (not is_shortcut)
 
 
 if __name__ == '__main__':
@@ -229,7 +243,7 @@ if __name__ == '__main__':
     plt.imshow(obs[0][0].reshape((window, window)))
     plt.show()
 
-    for action in [1]*10:
+    for action in [1] * 10:
         env.act(action)
         obs = env.observe()
         value = env.get_value()
@@ -239,6 +253,6 @@ if __name__ == '__main__':
         # plt.imshow(env.render()[1])
         # plt.show()
         print(obs[0][1])
-        #print(obs[1])
+        # print(obs[1])
         print(value, probs)
         print(f'vector {env.vec}')
