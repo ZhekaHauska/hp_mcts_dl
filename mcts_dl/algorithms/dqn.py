@@ -473,7 +473,7 @@ class DQNAgentCurriculum:
 
 if __name__ == '__main__':
     import yaml
-    with open('../../configs/dqn/dqn_curriculum_default.yaml', 'r') as file:
+    with open('../../configs/value_policy_network/dqn_curriculum_default.yaml', 'r') as file:
         config = yaml.load(file, yaml.Loader)
 
     runner = DQNAgentCurriculum(config)

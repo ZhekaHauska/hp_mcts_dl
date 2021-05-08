@@ -367,7 +367,7 @@ class VPAgentCurriculum:
 if __name__ == '__main__':
     import yaml
 
-    with open('../../configs/dqn/vp_curriculum_default.yaml', 'r') as file:
+    with open('../../configs/value_policy_network/vp_curriculum_default.yaml', 'r') as file:
         config = yaml.load(file, yaml.Loader)
 
     runner = VPAgentCurriculum(config)
