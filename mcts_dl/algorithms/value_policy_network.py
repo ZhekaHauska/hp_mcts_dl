@@ -267,7 +267,8 @@ class VPAgentCurriculum:
             env.act(action)
 
             # Store state in memory
-            self.agent.memory.push(window, vector, action_probs, value)
+            if not eval:
+                self.agent.memory.push(window, vector, action_probs, value)
 
         if log_metrics:
             wandb.log({'duration': t}, step=i_episode)
@@ -319,12 +320,12 @@ class VPAgentCurriculum:
 
                 torch.save({
                     'episode': episode,
-                    'level': self.current_level,
+                    'level': self.current_level-1,
                     'state_dict': self.agent.model.state_dict(),
                     'optimizer_state_dict': self.agent.optimizer.state_dict(),
                     'success_rate': success_rate
                 }, os.path.join(self.checkpoint_path,
-                                f'az_{episode}_{self.current_level}_{round(success_rate, 2)}_{wandb.run.id}.pt'))
+                                f'vp_{episode}_{self.current_level}_{round(success_rate, 2)}_{wandb.run.id}.pt'))
                 evaluations += 1
 
                 if (evaluations % self.full_evaluation_period) == 0:
@@ -348,59 +349,15 @@ class VPAgentCurriculum:
             episode += 1
             episode_level += 1
 
-    def run_random(self, learn=True, log=True, log_video_every=100):
-        if log:
-            run = wandb.init(project=self.config['project_name'], config=self.config)
-            wandb.log({'level': self.current_level}, step=0)
-
-        episode = 0
-        levels = random.sample(range(self.start_level, self.end_level), self.levels_at_once)
-        self.envs = self.load_envs(levels=levels)
-        while self.current_level <= self.end_level:
-            # choose map and task
-            env = random.choice(self.envs)
-            self.run_episode(env,
-                             log_metrics=log,
-                             log_animation=((episode % log_video_every) == 0) and log,
-                             i_episode=episode)
-
-            if ((episode % self.evaluate_every_episodes) == 0) or (episode == self.max_episodes):
-                _, success_rate, path_difference = self.evaluate()
-                if log:
-                    wandb.log({'eval_success_rate': success_rate,
-                               'path_difference': path_difference}, step=episode)
-                if success_rate >= self.success_rate_next_level:
-                    self.current_level += 1
-                    if log:
-                        wandb.log({'level': self.current_level}, step=episode)
-
-                torch.save({
-                    'episode': episode,
-                    'level': self.current_level,
-                    'state_dict': self.agent.model.state_dict(),
-                    'optimizer_state_dict': self.agent.optimizer.state_dict(),
-                    'success_rate': success_rate
-                }, os.path.join(self.checkpoint_path,
-                                f'az_{episode}_{self.current_level}_{round(success_rate, 2)}_{wandb.run.id}.pt'))
-
-            if (episode % self.change_level_every) == 0:
-                levels = random.sample(range(self.start_level, self.end_level), self.levels_at_once)
-                self.envs = self.load_envs(levels=levels)
-
-            if episode == self.max_episodes:
-                break
-
-            episode += 1
-
     def evaluate_model(self, start_level, end_level, log=True, log_animation=False, log_animation_every=10):
         if log:
             wandb.init(project=self.config['project_name'], config=self.config)
         i = 0
         for level in range(start_level, end_level):
             i, completed, path_difference = self.evaluate(levels=[level],
-                                                       log_animation=log_animation,
-                                                       log_animation_every=log_animation_every,
-                                                       counter_start=i)
+                                                          log_animation=log_animation,
+                                                          log_animation_every=log_animation_every,
+                                                          counter_start=i)
             metrics = {'success': completed, 'path_difference': path_difference, 'val_level': level}
             if log:
                 wandb.log(metrics)

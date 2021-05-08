@@ -1,8 +1,8 @@
-project_name: 'hpp_azero_curriculum'
+project_name: 'hpp_vp_net_curriculum'
 max_episodes: -1
 eval_period_episodes: 10000
 full_evaluation_period: 5
-load_checkpoint: 'az_340000_19_0.43_ofychytv.pt'
+load_checkpoint: null
 checkpoint_path: './checkpoints'
 start_level: 0
 end_level: 25
