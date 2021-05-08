@@ -1,6 +1,6 @@
 import os.path
 import numpy as np
-from math import atan, pi
+from math import atan, pi, tan, sqrt
 
 from mcts_dl.utils.utils import Map, ReadMapFromMovingAIFile, ReadTasksFromMovingAIFile
 
@@ -64,7 +64,7 @@ class GridWorld:
         new_position = self.position + self.actions[action]
         self.reward = 0
         if tuple(new_position) in self.map.GetNeighbors(*self.position):
-            if np.all(new_position == self.previous_position):
+            if self.disable_repetitions and np.all(new_position == self.previous_position):
                 self.done = True
                 self.reward = self.collision_reward
             else:
@@ -132,7 +132,12 @@ class GridWorld:
     def observe(self):
         window = self.get_window(np.array(self.map.cells), self.position, self.window_size)
         vec = np.zeros(2)
-        vec[0] = atan(self.vec[0] / (self.vec[1] + 1e-12)) * 2 / pi
+        vec[0] = atan(self.vec[0] / (self.vec[1] + 1e-12))
+        if self.vec[1] < 0 < self.vec[0]:
+            vec[0] += pi
+        elif (self.vec[1] < 0) and (self.vec[0] <= 0):
+            vec[0] -= pi
+        vec[0] /= pi
         vec[1] = self.signal
         return (window, vec), self.reward, self.done
 
@@ -173,6 +178,40 @@ class GridWorld:
 
     def in_bounds(self, position):
         return (0 <= position[0] < self.reward_map.shape[0]) and (0 <= position[1] < self.reward_map.shape[1])
+
+
+def calculate_next_vector(vector, displacement, max_length):
+    """
+    Calculates new observation vector for GridWorld.
+    :param vector: (direction, distance), where direction -- alpha/pi, distance -- |v|/max_length
+    :param displacement: (displacement_rows, displacement_cols)
+    :param max_length: sqrt(2)*map_width
+    :return: new observation vector (direction, distance)
+    """
+    # recover vector to goal
+    alpha = vector[0]*pi
+    d = tan(alpha)
+    col = max_length * vector[1]/sqrt(d**2 + 1)
+    row = d * col
+    if abs(alpha) > pi/2:
+        col = -col
+
+    new_row = row + displacement[0]
+    new_col = col + displacement[1]
+    # get vector back again
+    new_vec = np.zeros(2)
+    new_vec[0] = atan(new_row / (new_col + 1e-12))
+    if new_col < 0 < new_row:
+        new_vec[0] += pi
+    elif (new_col < 0) and (new_row <= 0):
+        new_vec[0] -= pi
+    new_vec[0] /= pi
+    new_vec[1] = sqrt(new_col**2 + new_row**2) / max_length
+    return new_vec
+
+
+def is_move_possible(obs_window, displacement):
+    pass
 
 
 if __name__ == '__main__':

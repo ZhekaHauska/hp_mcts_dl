@@ -1,5 +1,5 @@
 from mcts_dl.algorithms.mcts import MCTS
-from mcts_dl.algorithms.policy_value_network import ValuePolicyNetwork
+from mcts_dl.algorithms.value_policy_network import ValuePolicyNetwork
 from mcts_dl.algorithms.model_network import ModelNetworkBorder
 
 import torch

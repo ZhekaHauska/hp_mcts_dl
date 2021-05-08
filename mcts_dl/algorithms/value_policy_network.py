@@ -30,14 +30,14 @@ class ValuePolicyNetwork(nn.Module):
         self.bn1 = nn.BatchNorm2d(16)
         self.conv2 = nn.Conv2d(16, 32, padding=0, kernel_size=3, stride=1)
         self.bn2 = nn.BatchNorm2d(32)
-        # self.conv3 = nn.Conv2d(32, 32, padding=0, kernel_size=3, stride=1)
-        # self.bn3 = nn.BatchNorm2d(32)
+        self.conv3 = nn.Conv2d(32, 32, padding=0, kernel_size=3, stride=1)
+        self.bn3 = nn.BatchNorm2d(32)
 
         def conv_out_size(w, padding, kernel, stride):
             return int((w + 2 * padding - (kernel - 1) - 1) / stride + 1)
 
-        out_h = conv_out_size(conv_out_size(h, 0, 3, 1), 0, 3, 1)
-        out_w = conv_out_size(conv_out_size(w, 0, 3, 1), 0, 3, 1)
+        out_h = conv_out_size(conv_out_size(conv_out_size(h, 0, 3, 1), 0, 3, 1), 0, 3, 1)
+        out_w = conv_out_size(conv_out_size(conv_out_size(w, 0, 3, 1), 0, 3, 1), 0, 3, 1)
 
         self.fc1 = nn.Linear(32 * out_h * out_w, 64)
         self.bn4 = nn.BatchNorm1d(64)
@@ -63,8 +63,8 @@ class ValuePolicyNetwork(nn.Module):
         x = self.bn1(x)
         x = F.relu(self.conv2(x))
         x = self.bn2(x)
-        # x = F.relu(self.conv3(x))
-        # x = self.bn3(x)
+        x = F.relu(self.conv3(x))
+        x = self.bn3(x)
         x = F.relu(self.fc1(x.view(x.size(0), -1)))
         x = self.bn4(x)
         # vector
@@ -110,11 +110,11 @@ class VPAgent:
         self.memory = ReplayMemory(self.capacity, obj=Example)
         self.optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate)
         self.n_optimizations = 0
+        self.steps_since_last_opt = 0
 
     def make_action(self, state, evaluation=False):
         noise = self.eps_end + (self.eps_start - self.eps_end) * \
                 math.exp(-1. * self.steps_done / self.eps_decay)
-        self.steps_done += 1
         self.model.eval()
         scores = self.model(*state)[1]
         if evaluation:
@@ -125,6 +125,9 @@ class VPAgent:
             probs /= probs.sum()
             probs = probs.cpu().detach().numpy()
             action = np.random.choice(np.arange(probs.size), p=probs.flatten())
+
+            self.steps_done += 1
+            self.steps_since_last_opt += 1
         return action
 
     def optimize_model(self):
@@ -148,11 +151,13 @@ class VPAgent:
         policy_loss = F.kl_div(probs_batch, exp_probs_batch, reduction='sum')
         # Optimize the model
         self.optimizer.zero_grad()
-        (0.1*value_loss + policy_loss).backward()
+        (0.5*value_loss + policy_loss).backward()
         for param in self.model.parameters():
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
+
         self.n_optimizations += 1
+        self.steps_since_last_opt = 0
         return value_loss.item(), policy_loss.item()
 
 
@@ -224,10 +229,10 @@ class VPAgentCurriculum:
         path_difference = np.zeros(len(envs))
         i = counter_start
         for j, env in enumerate(envs):
-            is_success, duration, v_loss, p_loss, task_length = self.run_episode(env, i,
-                                                                                 log_metrics=False, learn=False,
-                                                                                 eval=True,
-                                                                                 log_animation=(log_animation and ((i % log_animation_every) == 0)))
+            is_success, duration, task_length = self.run_episode(env, i,
+                                                                 log_metrics=False,
+                                                                 eval=True,
+                                                                 log_animation=(log_animation and ((i % log_animation_every) == 0)))
             completed[j] = int(is_success)
             if task_length != 0:
                 path_difference[j] = (env.path_length - task_length) / task_length
@@ -236,20 +241,11 @@ class VPAgentCurriculum:
 
         return i, completed.mean(), path_difference[completed == 1].mean()
 
-    def run_episode(self, env, i_episode, learn=True, log_metrics=True, log_animation=False, eval=False):
+    def run_episode(self, env, i_episode, log_metrics=True, log_animation=False, eval=False):
         env.reset()
 
-        total_val_loss = 0
-        total_pol_loss = 0
-        n_optimizations = 0
         for t in count():
             obs, reward, is_done = env.observe()
-            # Perform one step of the optimization
-            if learn and ((self.agent.steps_done % self.optimize_every_step) == 0):
-                value_loss, policy_loss = self.agent.optimize_model()
-                total_val_loss += value_loss
-                total_pol_loss += policy_loss
-                n_optimizations += 1
 
             if log_animation:
                 world, rmap = env.render()
@@ -273,15 +269,6 @@ class VPAgentCurriculum:
             # Store state in memory
             self.agent.memory.push(window, vector, action_probs, value)
 
-        if n_optimizations != 0:
-            av_val_loss = total_val_loss / n_optimizations
-            av_pol_loss = total_pol_loss / n_optimizations
-            if log_metrics:
-                wandb.log({'value_loss': av_val_loss, 'policy_loss': av_pol_loss, 'n_opt': self.agent.n_optimizations}, step=i_episode)
-        else:
-            av_val_loss = 0
-            av_pol_loss = 0
-
         if log_metrics:
             wandb.log({'duration': t}, step=i_episode)
 
@@ -293,9 +280,9 @@ class VPAgentCurriculum:
             wandb.log({f'animation': wandb.Video(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', fps=3,
                                                  format='gif')}, step=i_episode)
 
-        return env.is_success, t, av_val_loss, av_pol_loss, env.task_length
+        return env.is_success, t, env.task_length
 
-    def run_curriculum(self, learn=True, log=True, log_video_every=100):
+    def run_curriculum(self, log=True, log_video_every=100):
         if log:
             run = wandb.init(project=self.config['project_name'], config=self.config)
             wandb.log({'level': self.current_level}, step=0)
@@ -303,14 +290,18 @@ class VPAgentCurriculum:
         episode = 0
         episode_level = 0
         evaluations = 0
-        while self.current_level <= self.end_level:
+        while True:
             # choose map and task
             env = random.choice(self.envs)
             self.run_episode(env,
                              log_metrics=log,
                              log_animation=((episode % log_video_every) == 0) and log,
-                             i_episode=episode,
-                             learn=learn)
+                             i_episode=episode)
+            if self.agent.steps_since_last_opt > self.optimize_every_step:
+                value_loss, policy_loss = self.agent.optimize_model()
+                if log:
+                    wandb.log({'value_loss': value_loss, 'policy_loss': policy_loss,
+                               'n_optimization': self.agent.n_optimizations}, step=episode)
 
             if ((episode % self.evaluate_every_episodes) == 0) or (episode == self.max_episodes):
                 _, success_rate, path_difference = self.evaluate()
@@ -320,6 +311,8 @@ class VPAgentCurriculum:
                 if success_rate >= self.success_rate_next_level:
                     episode_level = 0
                     self.current_level += 1
+                    if self.current_level > self.end_level:
+                        self.current_level = self.start_level
                     self.envs = self.load_envs()
                     if log:
                         wandb.log({'level': self.current_level}, step=episode)
@@ -343,6 +336,8 @@ class VPAgentCurriculum:
             if ((episode_level+1) % self.change_level_every) == 0:
                 episode_level = 0
                 self.current_level += 1
+                if self.current_level > self.end_level:
+                    self.current_level = self.start_level
                 self.envs = self.load_envs()
                 if log:
                     wandb.log({'level': self.current_level}, step=episode)
@@ -367,8 +362,7 @@ class VPAgentCurriculum:
             self.run_episode(env,
                              log_metrics=log,
                              log_animation=((episode % log_video_every) == 0) and log,
-                             i_episode=episode,
-                             learn=learn)
+                             i_episode=episode)
 
             if ((episode % self.evaluate_every_episodes) == 0) or (episode == self.max_episodes):
                 _, success_rate, path_difference = self.evaluate()
@@ -609,8 +603,9 @@ class VPTrainer:
 if __name__ == '__main__':
     import yaml
 
-    with open('../../configs/dqn/azero_curriculum_default.yaml', 'r') as file:
+    with open('../../configs/dqn/vp_curriculum_default.yaml', 'r') as file:
         config = yaml.load(file, yaml.Loader)
 
     runner = VPAgentCurriculum(config)
-    runner.run_curriculum(log_video_every=1000)
+    runner.run_curriculum(log_video_every=5000)
+    # runner.evaluate_model(0, 20, log_animation=True, log_animation_every=10)
