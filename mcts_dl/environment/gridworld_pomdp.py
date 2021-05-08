@@ -242,17 +242,20 @@ if __name__ == '__main__':
     obs = env.observe()
     plt.imshow(obs[0][0].reshape((window, window)))
     plt.show()
+    for direction in range(8):
+        env.reset()
+        pred_obs_vec = np.zeros(2)
+        for action in [direction] * 10:
+            env.act(action)
+            obs, reward, done = env.observe()
+            window_obs, obs_vec = obs
+            value = env.get_value()
+            probs = env.get_action_probs()
 
-    for action in [1] * 10:
-        env.act(action)
-        obs = env.observe()
-        value = env.get_value()
-        probs = env.get_action_probs()
-        plt.imshow(env.render()[0])
-        plt.show()
-        # plt.imshow(env.render()[1])
-        # plt.show()
-        print(obs[0][1])
-        # print(obs[1])
-        print(value, probs)
-        print(f'vector {env.vec}')
+            print(f'value {value}, probs: {probs}')
+            print(f'vector {env.vec}')
+            print(f'obs vector: {obs[0][1]}')
+            print(f'predicted obs vector: {pred_obs_vec}')
+            print(f'prediction error: {obs_vec - pred_obs_vec}')
+
+            pred_obs_vec = calculate_next_vector(obs_vec, env.actions[action], env.max_length)
