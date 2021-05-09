@@ -2,6 +2,8 @@ import torch
 import numpy
 import math
 
+from mcts_dl.environment.gridworld_pomdp import is_move_possible
+
 
 class Node:
     def __init__(self, prior):
@@ -69,7 +71,6 @@ class MCTS:
         policy_value_model,
         observation_model,
         observation,
-        legal_actions,
         add_exploration_noise,
         override_root_with=None,
     ):
@@ -86,7 +87,7 @@ class MCTS:
             root = Node(0)
             observation = torch.tensor(observation).float().unsqueeze(0).to(next(policy_value_model.parameters()).device)
             (root_predicted_value, policy_logits) = policy_value_model(observation)
-
+            legal_actions = self.get_legal_actions(observation[0])
             root.expand(legal_actions, policy_logits, observation)
 
         if add_exploration_noise:
@@ -113,14 +114,14 @@ class MCTS:
             # get next observation
             observation = observation_model.run(
                 parent.observation,
-                action,
+                self.actions[action],
                 parent.observation.device,
             )
             # get value and policy for this new observation
             value, policy_logits = policy_value_model(observation)
             value = value.item()
             # define legal actions
-            legal_actions
+            legal_actions = self.get_legal_actions(observation[0])
             node.expand(
                 legal_actions,
                 policy_logits,
@@ -191,6 +192,13 @@ class MCTS:
             min_max_stats.update(self.discount * node.value())
 
             value = self.discount * value
+
+    def get_legal_actions(self, observation_window):
+        legal_actions = list()
+        for action, displacement in enumerate(self.actions):
+            if is_move_possible(observation_window, displacement):
+                legal_actions.append(action)
+        return legal_actions
 
 
 class MinMaxStats:
