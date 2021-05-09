@@ -196,8 +196,8 @@ def calculate_next_vector(vector, displacement, max_length):
     if abs(alpha) > pi / 2:
         col = -col
 
-    new_row = row + displacement[0]
-    new_col = col + displacement[1]
+    new_row = row - displacement[0]
+    new_col = col - displacement[1]
     # get vector back again
     new_vec = np.zeros(2)
     new_vec[0] = atan(new_row / (new_col + 1e-12))
@@ -244,18 +244,21 @@ if __name__ == '__main__':
     plt.show()
     for direction in range(8):
         env.reset()
-        pred_obs_vec = np.zeros(2)
+        obs, _, _ = env.observe()
+        obs_vec = obs[1]
         for action in [direction] * 10:
+            pred_obs_vec = calculate_next_vector(obs_vec, env.actions[action], env.max_length)
             env.act(action)
             obs, reward, done = env.observe()
             window_obs, obs_vec = obs
             value = env.get_value()
             probs = env.get_action_probs()
 
+            print('-'*10)
+            print(f'displacement: {env.actions[action]}')
             print(f'value {value}, probs: {probs}')
             print(f'vector {env.vec}')
-            print(f'obs vector: {obs[0][1]}')
+            print(f'obs vector: {obs_vec}')
             print(f'predicted obs vector: {pred_obs_vec}')
             print(f'prediction error: {obs_vec - pred_obs_vec}')
 
-            pred_obs_vec = calculate_next_vector(obs_vec, env.actions[action], env.max_length)
