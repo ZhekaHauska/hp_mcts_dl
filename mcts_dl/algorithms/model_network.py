@@ -51,6 +51,7 @@ class ModelNetworkWindow(nn.Module):
 class ModelNetworkBorder(nn.Module):
     def __init__(self, window_size=21, map_size=256):
         super(ModelNetworkBorder, self).__init__()
+        self.window_size = window_size
         self.map_size = map_size
 
         self.input = nn.Sequential(
@@ -74,22 +75,68 @@ class ModelNetworkBorder(nn.Module):
 
         return outputs
 
-    def predict(self, window, action):
-        outputs = self.forward(window)
-        next_window = None # f(outputs, action, window)
+    def make_window(self, inputs, outputs, actions):
+        start = 0
+        end = self.window_size + 2
+        up = outputs[:, start:end]
 
-        return next_window
+        start = end
+        end = start + self.window_size
+        right = outputs[:, start:end]
+
+        start = end
+        end = start + self.window_size + 2
+        down = outputs[:, start:end]
+
+        start = end
+        end = start + self.window_size
+        left = outputs[:, start:end]
+
+        result = torch.zeros((inputs.shape[0], 1, self.window_size + 2, self.window_size + 2))
+        result[:, :, 0, :] = up.unsqueeze(1)
+        result[:, :, 1:-1, -1] = right.unsqueeze(1)
+        result[:, :, -1, :] = down.unsqueeze(1)
+        result[:, :, 1:-1, 0] = left.unsqueeze(1)
+        result[:, :, 1:-1, 1:-1] = inputs.cpu().detach()
+
+        outputs = torch.zeros_like(inputs)
+        for idx, action in enumerate(actions):
+            dy = int(actions[idx, 0].item())
+            dx = int(actions[idx, 1].item())
+
+            y0 = self.window_size//2 + 1
+            x0 = self.window_size//2 + 1
+
+            y = y0 + dy
+            x = x0 + dx
+
+            outputs[idx] = result[idx, :, (y - self.window_size//2):(y + self.window_size//2 + 1), (x - self.window_size//2):(x + self.window_size//2 + 1)]
+
+        threshold = 0.5
+        outputs = outputs.cpu().detach().squeeze() > threshold
+
+        return outputs.float()
+
+    def predict(self, window, action, device):
+        window = torch.from_numpy(window).float()
+
+        inputs = window.reshape(1, 1, window.shape[0], window.shape[0])
+        inputs = inputs.to(device)
+
+        outputs = self.forward(inputs)
+        actions = action.unsqueeze(0)
+        next_window = self.make_window(inputs, outputs, actions)
+
+        return next_window.numpy()
 
     def run(self, observation, action, device):
         window = observation[0]
         vector = observation[1]
         displacement = action
         max_length = np.sqrt(2) * self.map_size
-
         next_vector = calculate_next_vector(vector, displacement, max_length)
 
-        window = window.to(device)
-        next_window = self.predict(window, action)
+        next_window = self.predict(window, action, device)
 
         return (next_window, next_vector)
 
@@ -224,6 +271,10 @@ class Runner:
 
                     outputs = self.model(inputs, actions)
 
+                # window = inputs[0][0].cpu().numpy()
+                # action = actions[0]
+                # next_window = self.model.predict(window, action, self.device)
+
                 loss = self.loss_func(outputs, targets)
                 epoch_metrics['loss'] += loss.cpu().detach()
 
@@ -245,47 +296,6 @@ class Runner:
             epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
 
         return epoch_metrics
-
-    def make_window(self, inputs, outputs, actions):
-        start = 0
-        end = self.window_size + 2
-        up = outputs[:, start:end]
-
-        start = end
-        end = start + self.window_size
-        right = outputs[:, start:end]
-
-        start = end
-        end = start + self.window_size + 2
-        down = outputs[:, start:end]
-
-        start = end
-        end = start + self.window_size
-        left = outputs[:, start:end]
-
-        result = torch.zeros((inputs.shape[0], 1, self.window_size + 2, self.window_size + 2))
-        result[:, :, 0, :] = up.unsqueeze(1)
-        result[:, :, 1:-1, -1] = right.unsqueeze(1)
-        result[:, :, -1, :] = down.unsqueeze(1)
-        result[:, :, 1:-1, 0] = left.unsqueeze(1)
-        result[:, :, 1:-1, 1:-1] = inputs.cpu().detach()
-
-        outputs = torch.zeros_like(inputs)
-        for idx, action in enumerate(actions):
-            dy = int(actions[idx, 0].item())
-            dx = int(actions[idx, 1].item())
-
-            y0 = self.offset + 1
-            x0 = self.offset + 1
-
-            y = y0 + dy
-            x = x0 + dx
-
-            outputs[idx] = result[idx, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
-
-        outputs = outputs.cpu().detach().squeeze() > self.threshold
-
-        return outputs
 
     def make_log_window(self, inputs, outputs, actions, target_windows):
         log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
@@ -426,7 +436,7 @@ class Runner:
             # torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/epoch_{epoch:04d}.pth")
 
         self.model.load_state_dict(best_model_wts)
-        torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/best_model.pth")
+        torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/model_net_{self.mode}_{self.window_size}.pth")
 
 
 if __name__ == '__main__':

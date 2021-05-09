@@ -19,7 +19,7 @@ environment:
 agent:
   vp_checkpoint: 'vp_320000_1_0.88_1geyd791.pt'
   vp_checkpoint_path: '../../checkpoints'
-  om_checkpoint: ''
+  om_checkpoint: 'model_net_21_border.pth'
   om_checkpoint_path: '../../checkpoints'
   device: 'gpu'
 
