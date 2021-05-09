@@ -1,0 +1,41 @@
+project_name: 'mcts_agent'
+entity: 'hauska'
+min_level: 0
+max_level: 25
+maps: null
+
+environment:
+  window_size: 21
+  goal_reward: 0
+  distance_reward_weight_forward: 0
+  distance_reward_weight_backward: 0
+  rest_distance_reward_weight: 0
+  collision_reward: 0
+  move_reward: 0
+  max_steps_mult: 3
+  path: ../../dataset/256/
+  disable_repetitions: true
+
+agent:
+  vp_checkpoint: ''
+  vp_checkpoint_path: ''
+  om_checkpoint: ''
+  om_checkpoint_path: ''
+  device: 'gpu'
+
+  vp_net:
+    input_channels: 1
+    h: 21
+    w: 21
+    input_vector_size: 2
+    n_actions: 8
+  om_net:
+    window_size: 21
+    map_size: 256
+  mcts:
+    num_simulations: 25
+    discount: 0.995
+    pb_c_base: 19652
+    pb_c_init: 1.25
+
+

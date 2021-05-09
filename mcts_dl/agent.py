@@ -17,8 +17,8 @@ class Agent:
     def __init__(self, config):
         self.config = config
         self.device = config['device']
-        vp_config = config['vp_config']
-        om_config = config['om_config']
+        vp_config = config['vp_net']
+        om_config = config['om_net']
         self.value_policy_net = ValuePolicyNetwork(**vp_config)
         self.observation_model_net = ModelNetworkBorder(**om_config)
 

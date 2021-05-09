@@ -60,6 +60,8 @@ class MCTS:
     """
 
     def __init__(self, config):
+        self.pb_c_base = config['pb_c_base']
+        self.pb_c_init = config['pb_c_init']
         self.config = config
         self.num_simulations = config['num_simulations']
         self.discount = config['discount']
@@ -161,9 +163,9 @@ class MCTS:
         """
         pb_c = (
             math.log(
-                (parent.visit_count + self.config.pb_c_base + 1) / self.config.pb_c_base
+                (parent.visit_count + self.pb_c_base + 1) / self.pb_c_base
             )
-            + self.config.pb_c_init
+            + self.pb_c_init
         )
         pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
 
@@ -173,8 +175,8 @@ class MCTS:
             # Mean value Q
             value_score = min_max_stats.normalize(
                 child.reward
-                + self.config.discount
-                * (child.value() if len(self.config.players) == 1 else -child.value())
+                + self.discount
+                * child.value()
             )
         else:
             value_score = 0
