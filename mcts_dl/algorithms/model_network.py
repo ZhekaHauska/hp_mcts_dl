@@ -130,7 +130,7 @@ class Runner:
     def sample_window(self, image_map):
         y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
         # is free place
-        while image_map[:, :, y0, x0].sum() != 0:
+        while image_map[:, :, y0-1:y0+2, x0-1:x0+1].sum() != 0:
             y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
 
         inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
@@ -140,12 +140,11 @@ class Runner:
 
         for i in range(inputs.shape[0]):
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
-
-            obs_window = inputs[i][0]
-            displacement = (dy, dx)
-            while (dy == 0 and dx == 0) or not is_move_possible(obs_window, displacement):
+            # obs_window = inputs[i][0]
+            # displacement = (dy, dx)
+            while dy == 0 and dx == 0:  # or not is_move_possible(obs_window, displacement):
                 dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
-                displacement = (dy, dx)
+                # displacement = (dy, dx)
 
             y = y0 + dy
             x = x0 + dx
@@ -168,12 +167,11 @@ class Runner:
         target_windows = torch.zeros_like(inputs)
         for i in range(inputs.shape[0]):
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
-
-            obs_window = inputs[i][0]
-            displacement = (dy, dx)
-            while (dy == 0 and dx == 0) or not is_move_possible(obs_window, displacement):
+            # obs_window = inputs[i][0]
+            # displacement = (dy, dx)
+            while dy == 0 and dx == 0: # or not is_move_possible(obs_window, displacement):
                 dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
-                displacement = (dy, dx)
+                # displacement = (dy, dx)
 
             y = y0
             x = x0
@@ -344,8 +342,9 @@ class Runner:
 
         return log
 
-    def eval(self, phase='val'):
+    def eval(self):
         self.model.eval()
+        phase = 'val'
         epoch_metrics = dict()
         epoch_metrics['loss'] = 0.0
 
@@ -396,20 +395,11 @@ class Runner:
 
         return epoch_metrics, log
 
-    def pred(self, inputs, actions, model_path=None):
-        if not model_path:
-            self.model.load_state_dict(torch.load(model_path))
+    def run(self):
+        wandb.init(project=self.config['project_name'], config=self.config)
 
-        self.model.eval()
-        outputs = self.model(inputs, actions)
-
-        return outputs
-
-    def run(self, log=True):
         np.random.seed(0)
         os.makedirs(self.checkpoints_dir, exist_ok=True)
-        if log:
-            wandb.init(project=self.config['project_name'], config=self.config)
 
         best_model_wts = copy.deepcopy(self.model.state_dict())
         best_loss = 1e10
@@ -422,7 +412,7 @@ class Runner:
 
             logs = {'train': train_metrics,
                     'val': val_metrics}
-            wandb.log(logs)
+            wandb.log(logs, step=epoch)
 
             val_loss = val_metrics['loss']
             if val_loss < best_loss:
@@ -433,7 +423,7 @@ class Runner:
 
                 # for im, c in zip([inputs[0], outputs[0], targets[0]], ['input', 'output', 'target'])]})
 
-            torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/epoch_{epoch:05d}.pth")
+            # torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/epoch_{epoch:04d}.pth")
 
         self.model.load_state_dict(best_model_wts)
         torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/best_model.pth")
@@ -446,4 +436,4 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run(False)
+    runner.run()
