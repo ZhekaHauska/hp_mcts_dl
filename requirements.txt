@@ -6,3 +6,6 @@ jupyter
 torch
 torchvision
 wandb
+
+imageio
+PyYAML
