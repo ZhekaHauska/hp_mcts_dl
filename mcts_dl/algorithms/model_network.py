@@ -10,6 +10,7 @@ import wandb
 
 from mcts_dl.utils.dataset import City
 from mcts_dl.utils.metrics import calc_iou, calc_acc, calc_f1
+from mcts_dl.environment.gridworld_pomdp import calculate_next_vector
 
 
 class ModelNetworkWindow(nn.Module):
@@ -48,28 +49,50 @@ class ModelNetworkWindow(nn.Module):
 
 
 class ModelNetworkBorder(nn.Module):
-    def __init__(self, window_size):
+    def __init__(self, window_size=21, map_size=256):
         super(ModelNetworkBorder, self).__init__()
+        self.map_size = map_size
+
         self.input = nn.Sequential(
-            nn.Conv2d(1, 2, 3),
+            nn.Conv2d(1, 8, 7),
+            nn.BatchNorm2d(8),
             nn.ReLU(),
-            nn.Conv2d(2, 4, 3),
+            nn.Conv2d(8, 4, 7),
+            nn.BatchNorm2d(4),
             nn.ReLU()
         )
 
         self.output = nn.Sequential(
-            nn.Linear(1156, 256),
-            nn.ReLU(),
-            nn.Linear(256, 4 * window_size + 4),
+            nn.Linear(1, 4 * window_size + 4),  # 196 1156
             nn.Sigmoid()
         )
 
     def forward(self, inputs):
         inputs = self.input(inputs)
         inputs = inputs.view(inputs.shape[0], -1)
+        # print(inputs.shape)
         outputs = self.output(inputs)
 
         return outputs
+
+    def predict(self, window, action):
+        outputs = self.forward(window)
+        next_window = None # f(outputs, action, window)
+
+        return next_window
+
+    def run(self, observation, action, device):
+        window = observation[0]
+        vector = observation[1]
+        displacement = action
+        max_length = np.sqrt(2) * self.map_size
+
+        next_vector = calculate_next_vector(vector, displacement, max_length)
+
+        window = window.to(device)
+        next_window = self.predict(window, action)
+
+        return (next_window, next_vector)
 
 
 class Runner:
@@ -77,8 +100,8 @@ class Runner:
         self.config = config
         self.mode = config['mode']
         self.map_size = config['map_size']
-        train_ds = City(map_root="../../data/new_train", map_size=self.map_size)
-        val_ds = City(map_root="../../data/new_val", map_size=self.map_size)
+        train_ds = City(map_root="../../data/new_val", map_size=self.map_size)
+        val_ds = City(map_root="../../data/new_train", map_size=self.map_size)
         test_ds = City(map_root="../../data/test", map_size=self.map_size)
 
         data_set = {'train': train_ds,
@@ -116,6 +139,9 @@ class Runner:
 
         for i in range(inputs.shape[0]):
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
+            while dy == 0 and dx == 0:
+                dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
+
             y = y0 + dy
             x = x0 + dx
             targets[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
@@ -133,6 +159,8 @@ class Runner:
         target_windows = torch.zeros_like(inputs)
         for i in range(inputs.shape[0]):
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
+            while dy == 0 and dx == 0:
+                dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
             y = y0
             x = x0
 
@@ -250,6 +278,9 @@ class Runner:
     def make_log_window(self, inputs, outputs, actions, target_windows):
         log_window = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
         idx = 0
+        dy = int(actions[idx, 0].item())
+        dx = int(actions[idx, 1].item())
+
         if self.mode == 'border':
             start = 0
             end = self.window_size + 2
@@ -274,9 +305,6 @@ class Runner:
             result[:, :, 1:-1, 0] = left.unsqueeze(1)
             result[:, :, 1:-1, 1:-1] = inputs.cpu().detach()
 
-            dy = int(actions[idx, 0].item())
-            dx = int(actions[idx, 1].item())
-
             y0 = self.offset + 1
             x0 = self.offset + 1
 
@@ -295,7 +323,12 @@ class Runner:
         log_window[target] = [0, 255, 0]
         log_window[intersection] = [255, 255, 255]
 
-        return log_window
+        log = dict()
+        log['image'] = log_window
+        log['dy'] = dy
+        log['dx'] = dx
+
+        return log
 
     def eval(self, phase='val'):
         self.model.eval()
@@ -344,9 +377,9 @@ class Runner:
         for m in epoch_metrics:
             epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
 
-        log_window = self.make_log_window(inputs, outputs, actions, target_windows)
+        log = self.make_log_window(inputs, outputs, actions, target_windows)
 
-        return epoch_metrics, log_window
+        return epoch_metrics, log
 
     def pred(self, inputs, actions, model_path=None):
         if not model_path:
@@ -378,7 +411,7 @@ class Runner:
 
         for epoch in range(self.num_epochs):
             train_metrics = self.train()
-            val_metrics, log_window = self.eval()
+            val_metrics, log = self.eval()
 
             logs = {'train': train_metrics,
                     'val': val_metrics}
@@ -389,7 +422,7 @@ class Runner:
                 best_loss = val_loss
                 best_model_wts = copy.deepcopy(self.model.state_dict())
 
-                wandb.log({f"epoch = {epoch}": [wandb.Image(log_window)]})
+                wandb.log({f"epoch = {epoch}": [wandb.Image(log['image'], caption=f"({log['dy']},{log['dx']})")]})
 
                 # for im, c in zip([inputs[0], outputs[0], targets[0]], ['input', 'output', 'target'])]})
 

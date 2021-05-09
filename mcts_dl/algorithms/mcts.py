@@ -111,9 +111,10 @@ class MCTS:
             # state given an action and the previous hidden state
             parent = search_path[-2]
             # get next observation
-            observation = observation_model(
+            observation = observation_model.run(
                 parent.observation,
-                torch.tensor([[action]]).to(parent.observation.device),
+                action,
+                parent.observation.device,
             )
             # get value and policy for this new observation
             value, policy_logits = policy_value_model(observation)
