@@ -10,7 +10,7 @@ import wandb
 
 from mcts_dl.utils.dataset import City
 from mcts_dl.utils.metrics import calc_iou, calc_acc, calc_f1
-from mcts_dl.environment.gridworld_pomdp import calculate_next_vector
+from mcts_dl.environment.gridworld_pomdp import calculate_next_vector, is_move_possible
 
 
 class ModelNetworkWindow(nn.Module):
@@ -54,23 +54,22 @@ class ModelNetworkBorder(nn.Module):
         self.map_size = map_size
 
         self.input = nn.Sequential(
-            nn.Conv2d(1, 8, 7),
-            nn.BatchNorm2d(8),
+            nn.Conv2d(1, 2, 3),
+            nn.BatchNorm2d(2),
             nn.ReLU(),
-            nn.Conv2d(8, 4, 7),
+            nn.Conv2d(2, 4, 3),
             nn.BatchNorm2d(4),
             nn.ReLU()
         )
 
         self.output = nn.Sequential(
-            nn.Linear(1, 4 * window_size + 4),  # 196 1156
+            nn.Linear(1156, 4 * window_size + 4),
             nn.Sigmoid()
         )
 
     def forward(self, inputs):
         inputs = self.input(inputs)
         inputs = inputs.view(inputs.shape[0], -1)
-        # print(inputs.shape)
         outputs = self.output(inputs)
 
         return outputs
@@ -100,13 +99,12 @@ class Runner:
         self.config = config
         self.mode = config['mode']
         self.map_size = config['map_size']
-        train_ds = City(map_root="../../data/new_val", map_size=self.map_size)
-        val_ds = City(map_root="../../data/new_train", map_size=self.map_size)
-        test_ds = City(map_root="../../data/test", map_size=self.map_size)
+
+        train_ds = City(map_root="../../data/train", map_size=self.map_size)
+        val_ds = City(map_root="../../data/val", map_size=self.map_size)
 
         data_set = {'train': train_ds,
-                    'val': val_ds,
-                    'test': test_ds}
+                    'val': val_ds}
 
         self.offset = config['offset']
 
@@ -122,16 +120,19 @@ class Runner:
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.num_epochs = config['num_epochs']
 
-        self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=2, shuffle=True),
-                             'val': DataLoader(data_set['val'], batch_size=2, shuffle=True),
-                             'test': DataLoader(data_set['test'], batch_size=2, shuffle=True)}
+        self.data_loaders = {'train': DataLoader(data_set['train'], batch_size=6, shuffle=True),
+                             'val': DataLoader(data_set['val'], batch_size=4, shuffle=True)}
 
         self.num_steps = config['num_steps']
         self.threshold = config['threshold']
-        self.checkpoints_dir = f"{config['checkpoints_dir']}/offset_{config['offset']}_num_steps_{config['num_steps']}"
+        self.checkpoints_dir = config['checkpoints_dir']
 
     def sample_window(self, image_map):
         y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
+        # is free place
+        while image_map[:, :, y0, x0].sum() != 0:
+            y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
+
         inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
 
         targets = torch.zeros_like(inputs)
@@ -139,11 +140,16 @@ class Runner:
 
         for i in range(inputs.shape[0]):
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
-            while dy == 0 and dx == 0:
+
+            obs_window = inputs[i][0]
+            displacement = (dy, dx)
+            while (dy == 0 and dx == 0) or not is_move_possible(obs_window, displacement):
                 dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
+                displacement = (dy, dx)
 
             y = y0 + dy
             x = x0 + dx
+
             targets[i] = image_map[i, :, (y - self.offset):(y + self.offset + 1), (x - self.offset):(x + self.offset + 1)]
             actions[i][0] = dy
             actions[i][1] = dx
@@ -152,15 +158,23 @@ class Runner:
 
     def sample_border(self, image_map):
         y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
-        inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
+        # is free place
+        while image_map[:, :, y0, x0].sum() != 0:
+            y0, x0 = np.random.randint(self.offset + 1, self.map_size - self.offset - 1, size=(1, 2))[0]
 
+        inputs = image_map[:, :, (y0 - self.offset):(y0 + self.offset + 1), (x0 - self.offset):(x0 + self.offset + 1)]
         targets = torch.zeros((inputs.shape[0], 4 * self.window_size + 4))
         actions = torch.zeros((inputs.shape[0], 2))
         target_windows = torch.zeros_like(inputs)
         for i in range(inputs.shape[0]):
             dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
-            while dy == 0 and dx == 0:
+
+            obs_window = inputs[i][0]
+            displacement = (dy, dx)
+            while (dy == 0 and dx == 0) or not is_move_possible(obs_window, displacement):
                 dy, dx = np.random.randint(-1, 2, size=(1, 2))[0]
+                displacement = (dy, dx)
+
             y = y0
             x = x0
 
@@ -229,8 +243,8 @@ class Runner:
                     iou = calc_iou(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                     epoch_metrics['iou'] += iou
 
-            for m in epoch_metrics:
-                epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
+        for m in epoch_metrics:
+            epoch_metrics[m] = epoch_metrics[m] / (len(self.data_loaders[phase]) * self.num_steps)
 
         return epoch_metrics
 
@@ -368,6 +382,7 @@ class Runner:
                     if self.mode == 'border':
                         acc = calc_acc(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                         epoch_metrics['acc'] += acc
+
                         f1 = calc_f1(outputs.cpu().detach(), targets.cpu().detach(), threshold=self.threshold)
                         epoch_metrics['f1'] += f1
                     else:
@@ -389,14 +404,6 @@ class Runner:
         outputs = self.model(inputs, actions)
 
         return outputs
-
-    def test(self, model_path=None):
-        if not model_path:
-            self.model.load_state_dict(torch.load(model_path))
-        self.model.eval()
-        test_metrics, log_window = self.eval(phase='test')
-        wandb.log({'test': test_metrics})
-        wandb.log({f"test": [wandb.Image(log_window)]})
 
     def run(self, log=True):
         np.random.seed(0)
@@ -439,4 +446,4 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = Runner(config)
-    runner.run(True)
+    runner.run(False)

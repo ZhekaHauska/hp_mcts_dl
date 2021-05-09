@@ -1,6 +1,6 @@
 project_name: 'mcts_dl_model_network'
 map_size: 256
-mode: 'window'
+mode: 'border'
 offset: 10
 threshold: 0.5
 lr: 0.0001
