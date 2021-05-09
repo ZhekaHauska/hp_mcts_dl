@@ -17,10 +17,10 @@ environment:
   disable_repetitions: true
 
 agent:
-  vp_checkpoint: ''
-  vp_checkpoint_path: ''
+  vp_checkpoint: 'vp_210000_21_0.45_1geyd791.pt'
+  vp_checkpoint_path: '../../checkpoints'
   om_checkpoint: ''
-  om_checkpoint_path: ''
+  om_checkpoint_path: '../../checkpoints'
   device: 'gpu'
 
   vp_net:
