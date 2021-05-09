@@ -2,6 +2,7 @@ from mcts_dl.algorithms.mcts import MCTS
 from mcts_dl.algorithms.value_policy_network import ValuePolicyNetwork
 from mcts_dl.algorithms.model_network import ModelNetworkBorder
 
+import numpy
 import torch
 import os
 
@@ -27,5 +28,18 @@ class Agent:
 
         self.mcts = MCTS(config['mcts'])
 
-    def make_action(self):
-        pass
+    def make_action(self, observation):
+        root, mcts_info = self.mcts.run(self.value_policy_net,
+                                        self.observation_model_net,
+                                        observation,
+                                        list(range(8)),
+                                        False)
+
+        visit_counts = numpy.array(
+            [child.visit_count for child in root.children.values()], dtype="int32"
+        )
+        actions = [action for action in root.children.keys()]
+
+        action = actions[numpy.argmax(visit_counts)]
+
+        return action

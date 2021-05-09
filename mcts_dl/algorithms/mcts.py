@@ -61,6 +61,8 @@ class MCTS:
         self.config = config
         self.num_simulations = config['num_simulations']
         self.discount = config['discount']
+        self.actions = numpy.array([[1, 1], [1, -1], [-1, -1], [-1, 1],
+                                    [0, 1], [0, -1], [1, 0], [-1, 0]])
 
     def run(
         self,
@@ -116,8 +118,10 @@ class MCTS:
             # get value and policy for this new observation
             value, policy_logits = policy_value_model(observation)
             value = value.item()
+            # define legal actions
+            legal_actions
             node.expand(
-                self.config.action_space,
+                legal_actions,
                 policy_logits,
                 observation,
             )
