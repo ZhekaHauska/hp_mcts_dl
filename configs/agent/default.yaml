@@ -13,15 +13,15 @@ environment:
   collision_reward: 0
   move_reward: 0
   max_steps_mult: 3
-  path: ../../dataset/256/
+  path: ../dataset/256/
   disable_repetitions: true
 
 agent:
   vp_checkpoint: 'vp_320000_1_0.88_1geyd791.pt'
-  vp_checkpoint_path: '../../checkpoints'
+  vp_checkpoint_path: '../checkpoints'
   om_checkpoint: 'model_net_21_border.pth'
-  om_checkpoint_path: '../../checkpoints'
-  device: 'gpu'
+  om_checkpoint_path: '../checkpoints'
+  device: 'cuda'
 
   vp_net:
     input_channels: 1
@@ -33,7 +33,7 @@ agent:
     window_size: 21
     map_size: 256
   mcts:
-    num_simulations: 25
+    num_simulations: 50
     discount: 0.995
     pb_c_base: 19652
     pb_c_init: 1.25

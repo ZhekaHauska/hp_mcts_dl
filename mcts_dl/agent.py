@@ -40,8 +40,7 @@ class Agent:
     def make_action(self, observation):
         root, mcts_info = self.mcts.run(self.value_policy_net,
                                         self.observation_model_net,
-                                        observation,
-                                        False)
+                                        observation)
 
         visit_counts = numpy.array(
             [child.visit_count for child in root.children.values()], dtype="int32"
@@ -64,6 +63,9 @@ class AgentRunner:
         self.min_level = config['min_level']
         self.max_level = config['max_level']
         self.map_names = config['maps']
+        if self.map_names is None:
+            self.map_names = filter(lambda x: x.split('.')[-1] == 'map', os.listdir(self.environment_config['path']))
+            self.map_names = [x.split('.')[0] for x in self.map_names]
 
     def run_episode(self, env, i_episode, log_metrics=True, log_animation=False):
         env.reset()
@@ -106,9 +108,12 @@ class AgentRunner:
         return env.is_success, t, path_difference, env.task_length
 
     def run(self, log_metrics=True, log_animation=True, log_animation_every=100, mode='test'):
+        if log_metrics or log_animation:
+            run = wandb.init(project=self.config['project_name'], config=self.config)
+
         episode = 0
         for level in range(self.min_level, self.max_level):
-            envs = self.load_envs([level], mode)
+            envs = self.load_envs([level], mode=mode)
             completed = numpy.zeros(len(envs))
             path_difference = numpy.zeros(len(envs))
             for i, env in enumerate(envs):
@@ -156,8 +161,8 @@ class AgentRunner:
 if __name__ == '__main__':
     import yaml
 
-    with open('../../configs/agent/default.yaml', 'r') as file:
+    with open('../configs/agent/default.yaml', 'r') as file:
         config = yaml.load(file, yaml.Loader)
 
     runner = AgentRunner(config)
-    runner.run(log_animation_every=10)
+    runner.run(log_metrics=True, log_animation=True, log_animation_every=10, mode='test')

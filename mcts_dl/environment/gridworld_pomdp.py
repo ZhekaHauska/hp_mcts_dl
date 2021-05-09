@@ -213,12 +213,12 @@ def calculate_next_vector(vector, displacement, max_length):
 def is_move_possible(obs_window, displacement):
     """
     Check move possibility using observation window
-    :param obs_window: 2D image
+    :param obs_window: (height, width) 2D image
     :param displacement: (delta_row, delta_col) -- agent displacement
     :return: True if move is possible, False -- otherwise
     """
-    pos_row = obs_window.shape[0] // 2 + 1
-    pos_col = obs_window.shape[1] // 2 + 1
+    pos_row = obs_window.shape[0] // 2
+    pos_col = obs_window.shape[1] // 2
 
     new_pos_row = pos_row + displacement[0]
     new_pos_col = pos_col + displacement[1]

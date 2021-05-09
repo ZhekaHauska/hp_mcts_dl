@@ -39,17 +39,6 @@ class Node:
         for action, p in policy.items():
             self.children[action] = Node(p)
 
-    def add_exploration_noise(self, dirichlet_alpha, exploration_fraction):
-        """
-        At the start of each search, we add dirichlet noise to the prior of the root to
-        encourage the search to explore new actions.
-        """
-        actions = list(self.children.keys())
-        noise = numpy.random.dirichlet([dirichlet_alpha] * len(actions))
-        frac = exploration_fraction
-        for a, n in zip(actions, noise):
-            self.children[a].prior = self.children[a].prior * (1 - frac) + n * frac
-
 
 class MCTS:
     """
@@ -73,7 +62,6 @@ class MCTS:
         policy_value_model,
         observation_model,
         observation,
-        add_exploration_noise,
         override_root_with=None,
     ):
         """
@@ -87,16 +75,9 @@ class MCTS:
             root_predicted_value = None
         else:
             root = Node(0)
-            observation = torch.tensor(observation).float().unsqueeze(0).to(next(policy_value_model.parameters()).device)
-            (root_predicted_value, policy_logits) = policy_value_model(observation)
-            legal_actions = self.get_legal_actions(observation[0])
+            (root_predicted_value, policy_logits) = policy_value_model(*observation)
+            legal_actions = self.get_legal_actions(observation[0].squeeze().cpu().numpy())
             root.expand(legal_actions, policy_logits, observation)
-
-        if add_exploration_noise:
-            root.add_exploration_noise(
-                dirichlet_alpha=self.config.root_dirichlet_alpha,
-                exploration_fraction=self.config.root_exploration_fraction,
-            )
 
         min_max_stats = MinMaxStats()
 
@@ -114,20 +95,25 @@ class MCTS:
             # state given an action and the previous hidden state
             parent = search_path[-2]
             # get next observation
+            win_obs = parent.observation[0].squeeze().cpu().numpy()
+            vec_obs = parent.observation[1].squeeze().cpu().numpy()
             observation = observation_model.run(
-                parent.observation,
-                self.actions[action],
-                parent.observation.device,
+                (win_obs, vec_obs),
+                torch.from_numpy(self.actions[action]),
+                parent.observation[0].device,
             )
             # get value and policy for this new observation
-            value, policy_logits = policy_value_model(observation)
+            next_win_obs = observation[0]
+            next_win_obs = torch.from_numpy(next_win_obs).float().unsqueeze(0).unsqueeze(0).to(parent.observation[0].device)
+            next_vec_obs = torch.from_numpy(observation[1]).float().unsqueeze(0).to(parent.observation[0].device)
+            value, policy_logits = policy_value_model(next_win_obs, next_vec_obs)
             value = value.item()
             # define legal actions
             legal_actions = self.get_legal_actions(observation[0])
             node.expand(
                 legal_actions,
                 policy_logits,
-                observation,
+                (next_win_obs, next_vec_obs),
             )
 
             self.backpropagate(search_path, value, min_max_stats)
@@ -173,11 +159,7 @@ class MCTS:
 
         if child.visit_count > 0:
             # Mean value Q
-            value_score = min_max_stats.normalize(
-                child.reward
-                + self.discount
-                * child.value()
-            )
+            value_score = min_max_stats.normalize(self.discount * child.value())
         else:
             value_score = 0
 
