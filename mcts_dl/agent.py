@@ -32,7 +32,7 @@ class Agent:
         self.value_policy_net.to(device=self.device).eval()
 
         checkpoint = torch.load(os.path.join(self.om_checkpoint_path, self.om_checkpoint_name))
-        self.observation_model_net.load_state_dict(checkpoint['state_dict'])
+        self.observation_model_net.load_state_dict(checkpoint)
         self.observation_model_net.to(device=self.device).eval()
 
         self.mcts = MCTS(config['mcts'])

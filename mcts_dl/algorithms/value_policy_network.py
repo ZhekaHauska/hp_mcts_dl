@@ -199,7 +199,7 @@ class VPAgentCurriculum:
         # division 6 2 2
         self.envs = self.load_envs()
 
-    def load_envs(self, n_maps=None, eval=False, levels=None):
+    def load_envs(self, n_maps=None, levels=None, mode='train'):
         indices = list(range(len(self.map_names)))
         if n_maps is not None:
             indices = random.sample(indices, n_maps)
@@ -208,12 +208,17 @@ class VPAgentCurriculum:
 
         envs = list()
         for level in levels:
-            if eval:
+            if mode == 'test':
+                start_task = level * 10 + 8
+                end_task = level * 10 + 10
+            elif mode == 'val':
                 start_task = level * 10 + 6
                 end_task = level * 10 + 8
-            else:
+            elif mode == 'train':
                 start_task = level * 10
                 end_task = level * 10 + 6
+            else:
+                raise ValueError(f'There is no such mode: {mode}! Possible modes: "test", "eval" and "train"')
 
             for i in indices:
                 for task in range(start_task, end_task):
@@ -222,20 +227,18 @@ class VPAgentCurriculum:
                     envs.append(GridWorld(**self.env_conf))
         return envs
 
-    def evaluate(self, levels=None, log_animation=False, log_animation_every=10, counter_start=0):
-        envs = self.load_envs(eval=True, levels=levels)
+    def evaluate(self, levels=None, log_animation=False, log_animation_every=10, counter_start=0, mode='val'):
+        envs = self.load_envs(levels=levels, mode=mode)
         completed = np.zeros(len(envs))
         path_difference = np.zeros(len(envs))
         i = counter_start
         for j, env in enumerate(envs):
-            is_success, duration, task_length = self.run_episode(env, i,
+            is_success, duration, path_diff, task_length = self.run_episode(env, i,
                                                                  log_metrics=False,
                                                                  eval=True,
                                                                  log_animation=(log_animation and ((i % log_animation_every) == 0)))
             completed[j] = int(is_success)
-            if task_length != 0:
-                path_difference[j] = (env.path_length - task_length) / task_length
-
+            path_difference[j] = path_diff
             i += 1
 
         return i, completed.mean(), path_difference[completed == 1].mean()
@@ -269,8 +272,14 @@ class VPAgentCurriculum:
             if not eval:
                 self.agent.memory.push(window, vector, action_probs, value)
 
+        if env.task_length != 0:
+            path_difference = (env.path_length - env.task_length) / env.task_length
+        else:
+            path_difference = 0
+
         if log_metrics:
-            wandb.log({'duration': t}, step=i_episode)
+            wandb.log({'duration': t, 'success': env.is_success, 'path_diff': path_difference,
+                       'task_length': env.task_length}, step=i_episode)
 
         if log_animation:
             with imageio.get_writer(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', mode='I', fps=3) as writer:
@@ -280,7 +289,7 @@ class VPAgentCurriculum:
             wandb.log({f'animation': wandb.Video(f'/tmp/{wandb.run.id}_episode_{i_episode}.gif', fps=3,
                                                  format='gif')}, step=i_episode)
 
-        return env.is_success, t, env.task_length
+        return env.is_success, t, path_difference, env.task_length
 
     def run_curriculum(self, log=True, log_video_every=100):
         if log:
@@ -348,7 +357,7 @@ class VPAgentCurriculum:
             episode += 1
             episode_level += 1
 
-    def evaluate_model(self, start_level, end_level, log=True, log_animation=False, log_animation_every=10):
+    def evaluate_model(self, start_level, end_level, log=True, log_animation=False, log_animation_every=10, mode='val'):
         if log:
             wandb.init(project=self.config['project_name'], config=self.config)
         i = 0
@@ -356,8 +365,9 @@ class VPAgentCurriculum:
             i, completed, path_difference = self.evaluate(levels=[level],
                                                           log_animation=log_animation,
                                                           log_animation_every=log_animation_every,
-                                                          counter_start=i)
-            metrics = {'success': completed, 'path_difference': path_difference, 'val_level': level}
+                                                          counter_start=i,
+                                                          mode=mode)
+            metrics = {'success_rate': completed, 'av_path_diff': path_difference, 'level': level}
             if log:
                 wandb.log(metrics)
             else:
@@ -371,5 +381,5 @@ if __name__ == '__main__':
         config = yaml.load(file, yaml.Loader)
 
     runner = VPAgentCurriculum(config)
-    runner.run_curriculum(log_video_every=5000)
-    # runner.evaluate_model(0, 20, log_animation=True, log_animation_every=10)
+    # runner.run_curriculum(log_video_every=5000)
+    runner.evaluate_model(0, 25, log_animation=True, log_animation_every=10)
