@@ -406,7 +406,7 @@ class Runner:
         return epoch_metrics, log
 
     def run(self):
-        # wandb.init(project=self.config['project_name'], config=self.config)
+        wandb.init(project=self.config['project_name'], config=self.config)
 
         np.random.seed(0)
         os.makedirs(self.checkpoints_dir, exist_ok=True)
@@ -436,7 +436,7 @@ class Runner:
             # torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/epoch_{epoch:04d}.pth")
 
         self.model.load_state_dict(best_model_wts)
-        torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/best_model.pth")
+        torch.save(self.model.state_dict(), f"{self.checkpoints_dir}/model_net_{self.mode}_{self.window_size}.pth")
 
 
 if __name__ == '__main__':
