@@ -2,7 +2,7 @@ project_name: 'hpp_vp_net_curriculum'
 max_episodes: -1
 eval_period_episodes: 10000
 full_evaluation_period: 5
-load_checkpoint: 'vp_390000_21_0.42_2g3mgd6u.pt'
+load_checkpoint: 'vp_320000_1_0.88_1geyd791.pt'
 checkpoint_path: './checkpoints'
 start_level: 0
 end_level: 25

@@ -151,3 +151,13 @@ class AgentRunner:
                     self.environment_config['map_name'] = self.map_names[i]
                     envs.append(GridWorld(**self.environment_config))
         return envs
+
+
+if __name__ == '__main__':
+    import yaml
+
+    with open('../../configs/agent/default.yaml', 'r') as file:
+        config = yaml.load(file, yaml.Loader)
+
+    runner = AgentRunner(config)
+    runner.run(log_animation_every=10)

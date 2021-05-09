@@ -1,7 +1,7 @@
 project_name: 'mcts_agent'
 entity: 'hauska'
 min_level: 0
-max_level: 25
+max_level: 26
 maps: null
 
 environment:
@@ -17,7 +17,7 @@ environment:
   disable_repetitions: true
 
 agent:
-  vp_checkpoint: 'vp_210000_21_0.45_1geyd791.pt'
+  vp_checkpoint: 'vp_320000_1_0.88_1geyd791.pt'
   vp_checkpoint_path: '../../checkpoints'
   om_checkpoint: ''
   om_checkpoint_path: '../../checkpoints'

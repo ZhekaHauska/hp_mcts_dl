@@ -382,4 +382,4 @@ if __name__ == '__main__':
 
     runner = VPAgentCurriculum(config)
     # runner.run_curriculum(log_video_every=5000)
-    runner.evaluate_model(0, 25, log_animation=True, log_animation_every=10)
+    runner.evaluate_model(0, 26, log_animation=True, log_animation_every=10, mode='test')
